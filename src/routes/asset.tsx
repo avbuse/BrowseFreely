@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { isValidUrl, isPrivateIP, ensureUrl, safeFetch, tlsOptions } from '../utils/url'
-import { isAd } from '../utils/adblocker'
+import { ensureAdblockerReady, matchAdRequest } from '../utils/adblocker'
 import { getSettings } from '../utils/settings'
 import {
   getCookiesForRequest,
@@ -33,8 +33,11 @@ assetRoute.get('/asset', async (c) => {
     return c.text('Forbidden URL', 403)
   }
 
-  if (isAd(targetUrl, referer, c.req.header('accept'))) {
-    return c.text('', 403)
+  await ensureAdblockerReady()
+
+  const adMatch = matchAdRequest(targetUrl, referer, c.req.header('accept'))
+  if (adMatch.blocked) {
+    return adMatch.response
   }
 
   const sid = getSessionId(c)
