@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { isValidUrl, isPrivateIP, ensureUrl, safeFetch, tlsOptions } from '../utils/url'
 import { rewriteHtml } from '../utils/rewriter'
-import { isAd } from '../utils/adblocker'
+import { ensureAdblockerReady, matchAdRequest } from '../utils/adblocker'
 import { getSettings } from '../utils/settings'
 import { getCookiesForRequest, saveCookiesFromResponse } from '../utils/session'
 import { mergeContextResponse } from '../utils/response'
@@ -49,8 +49,15 @@ browseRoute.get('/browse', async (c) => {
     )
   }
 
-  if (isAd(targetUrl, c.req.header('referer') || targetUrl, c.req.header('accept'))) {
-    return c.text('Blocked by Adblocker', 403)
+  await ensureAdblockerReady()
+
+  const adMatch = matchAdRequest(
+    targetUrl,
+    c.req.header('referer') || targetUrl,
+    c.req.header('accept')
+  )
+  if (adMatch.blocked) {
+    return adMatch.response
   }
 
   const settings = getSettings(c)
@@ -128,7 +135,7 @@ browseRoute.get('/browse', async (c) => {
 
     return mergeContextResponse(
       c,
-      rewriteHtml(
+      await rewriteHtml(
         cleanResponse,
         finalUrl,
         settings.disableJs,

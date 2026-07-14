@@ -304,7 +304,7 @@ export const HomePage = ({ settings }: { settings: UserSettings }) => {
                     Bypass adblock detection
                   </span>
                   <span style={{ display: 'block', fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                    Injects cosmetic filters and stubs common “please disable your adblocker” checks so pages still render after ads are stripped.
+                    Injects cosmetic filters, silent ad stubs, and anti-detection hooks so “please disable your adblocker” walls are less likely to appear after ads are stripped.
                   </span>
                 </div>
               </label>
