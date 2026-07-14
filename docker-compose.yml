@@ -22,4 +22,7 @@ services:
       # - ALLOW_PRIVATE_TARGETS=false
       # - INSECURE_TLS=false
       # - SECURE_COOKIES=false
+    volumes:
+      # Persist "Site broken?" reports across container restarts
+      - ./data:/app/data
     restart: unless-stopped

@@ -21,6 +21,10 @@ pnpm-debug.log*
 bun.lockb
 *.log
 
+# Local broken-site reports (persisted via volume in Docker)
+data/*
+!data/.gitkeep
+
 # Editor directories and files
 .idea
 .vscode

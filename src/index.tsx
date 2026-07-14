@@ -4,6 +4,7 @@ import { homeRoute } from './routes/home'
 import { browseRoute } from './routes/browse'
 import { assetRoute } from './routes/asset'
 import { apiRoute } from './routes/api'
+import { reportsRoute } from './routes/reports'
 import { getAdblocker } from './utils/adblocker'
 import { rateLimit } from './middleware/rateLimit'
 
@@ -42,6 +43,7 @@ app.route('/', homeRoute)
 app.route('/', browseRoute)
 app.route('/', assetRoute)
 app.route('/', apiRoute)
+app.route('/', reportsRoute)
 
 app.get('*', (c) => {
   const referer = c.req.header('referer')

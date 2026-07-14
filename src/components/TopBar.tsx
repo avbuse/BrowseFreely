@@ -48,9 +48,11 @@ export const TopBar = ({ currentUrl, disableJs }: { currentUrl: string, disableJ
             @media (min-width: 600px) {
               .brand-text { display: inline !important; }
               .js-text { display: inline !important; }
+              .report-text { display: inline !important; }
             }
             @media (max-width: 599px) {
               .js-text { display: none !important; }
+              .report-text { display: none !important; }
             }
           ` }} />
         </a>
@@ -103,8 +105,43 @@ export const TopBar = ({ currentUrl, disableJs }: { currentUrl: string, disableJ
         <button type="submit" style={{ display: 'none' }}>Go</button>
       </form>
 
-      <div style={{ display: 'flex', alignItems: 'center', flex: '1 1 0%', justifyContent: 'flex-end', gap: '12px', minWidth: '0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', flex: '1 1 0%', justifyContent: 'flex-end', gap: '8px', minWidth: '0' }}>
         
+        {/* Report broken / anti-adblock site — plain form so it works with NoScript */}
+        <form
+          action="/api/report-broken"
+          method="POST"
+          data-native-proxy-form="true"
+          title="Log this site for investigation (anti-adblock wall, broken page, etc.)"
+          style={{ margin: 0 }}
+        >
+          <input type="hidden" name="url" value={currentUrl} />
+          <button
+            type="submit"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '12px',
+              fontWeight: 500,
+              color: '#fbbf24',
+              background: 'rgba(251, 191, 36, 0.1)',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              border: '1px solid rgba(251, 191, 36, 0.25)',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span className="report-text">Site broken?</span>
+          </button>
+        </form>
+
         {/* JS Toggle Indicator */}
         <div title="JavaScript is currently enabled/disabled. Change this on the homepage." style={{
           display: 'flex',
