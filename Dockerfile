@@ -1,5 +1,5 @@
 # Use the official lightweight Bun image
-FROM oven/bun:1 as base
+FROM oven/bun:1
 WORKDIR /app
 
 # Copy package management files
