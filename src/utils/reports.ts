@@ -17,9 +17,12 @@ export type BrokenSiteReport = {
     ip: string
   }
   status: 'open' | 'investigating' | 'fixed' | 'wontfix'
+  githubIssueUrl?: string
+  githubIssueNumber?: number
+  githubError?: string
 }
 
-function reportsPath(): string {
+export function reportsPath(): string {
   return process.env.REPORTS_PATH || join(process.cwd(), 'data', 'broken-sites.jsonl')
 }
 
@@ -27,11 +30,11 @@ async function ensureParentDir(filePath: string) {
   await mkdir(dirname(filePath), { recursive: true })
 }
 
-export async function appendBrokenSiteReport(
+export function buildBrokenSiteReport(
   report: Omit<BrokenSiteReport, 'id' | 'reportedAt' | 'status' | 'hostname'> & {
     url: string
   }
-): Promise<BrokenSiteReport> {
+): BrokenSiteReport {
   let hostname = ''
   try {
     hostname = new URL(report.url).hostname
@@ -39,7 +42,7 @@ export async function appendBrokenSiteReport(
     hostname = report.url
   }
 
-  const full: BrokenSiteReport = {
+  return {
     id: crypto.randomUUID(),
     reportedAt: new Date().toISOString(),
     url: report.url,
@@ -49,11 +52,23 @@ export async function appendBrokenSiteReport(
     client: report.client,
     status: 'open',
   }
+}
 
+export async function saveBrokenSiteReport(report: BrokenSiteReport): Promise<void> {
   const path = reportsPath()
   await ensureParentDir(path)
-  await appendFile(path, JSON.stringify(full) + '\n', 'utf8')
-  console.log(`[REPORT] Broken site logged: ${full.hostname} (${full.id})`)
+  await appendFile(path, JSON.stringify(report) + '\n', 'utf8')
+  console.log(`[REPORT] Broken site logged: ${report.hostname} (${report.id})`)
+}
+
+/** @deprecated prefer buildBrokenSiteReport + saveBrokenSiteReport */
+export async function appendBrokenSiteReport(
+  report: Omit<BrokenSiteReport, 'id' | 'reportedAt' | 'status' | 'hostname'> & {
+    url: string
+  }
+): Promise<BrokenSiteReport> {
+  const full = buildBrokenSiteReport(report)
+  await saveBrokenSiteReport(full)
   return full
 }
 
@@ -70,7 +85,9 @@ export async function listBrokenSiteReports(): Promise<BrokenSiteReport[]> {
   const reports: BrokenSiteReport[] = []
   for (const line of lines) {
     try {
-      reports.push(JSON.parse(line) as BrokenSiteReport)
+      const parsed = JSON.parse(line) as BrokenSiteReport & { kind?: string }
+      if (parsed.kind === 'github-result') continue
+      reports.push(parsed)
     } catch {
       // skip corrupt lines
     }

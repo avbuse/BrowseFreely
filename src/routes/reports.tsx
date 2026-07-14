@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { Layout } from '../components/Layout'
 import { listBrokenSiteReports } from '../utils/reports'
+import { githubIssuesConfigured } from '../utils/githubIssues'
 
 export const reportsRoute = new Hono()
 
@@ -8,6 +9,10 @@ reportsRoute.get('/reports', async (c) => {
   const reports = await listBrokenSiteReports()
   const justReported = c.req.query('logged') === '1'
   const reportedUrl = c.req.query('url') || ''
+  const issue = c.req.query('issue') || ''
+  const issueUrl = c.req.query('issue_url') || ''
+  const gh = c.req.query('gh') || ''
+  const ghReady = githubIssuesConfigured()
 
   return c.html(
     <Layout>
@@ -21,8 +26,19 @@ reportsRoute.get('/reports', async (c) => {
           </h1>
           <p style={{ color: 'var(--text-muted)', margin: 0, lineHeight: 1.5, fontSize: '14px' }}>
             Logged when you hit <strong style={{ color: 'var(--text-main)' }}>Site broken?</strong> in
-            the proxy bar. Stored locally in <code style={{ color: 'var(--text-main)' }}>data/broken-sites.jsonl</code>.
-            Ask Cursor to investigate open reports when you want fixes.
+            the proxy bar. Saved locally in{' '}
+            <code style={{ color: 'var(--text-main)' }}>data/broken-sites.jsonl</code>
+            {ghReady ? (
+              <>
+                {' '}
+                and opened as a GitHub issue so Cursor can investigate from the repo.
+              </>
+            ) : (
+              <>
+                . Set <code style={{ color: 'var(--text-main)' }}>GITHUB_TOKEN</code> to also open
+                GitHub issues.
+              </>
+            )}
           </p>
         </div>
 
@@ -36,15 +52,43 @@ reportsRoute.get('/reports', async (c) => {
               background: 'rgba(16, 185, 129, 0.1)',
               color: '#6ee7b7',
               fontSize: '14px',
+              lineHeight: 1.5,
             }}
           >
-            Logged. Thanks — this site is on the list
+            Logged locally
             {reportedUrl ? (
               <>
-                : <code style={{ color: '#a7f3d0' }}>{reportedUrl}</code>
+                {' '}
+                for <code style={{ color: '#a7f3d0' }}>{reportedUrl}</code>
               </>
             ) : null}
             .
+            {issue && issueUrl ? (
+              <>
+                {' '}
+                GitHub issue{' '}
+                <a href={issueUrl} style={{ color: '#a7f3d0', textDecoration: 'underline' }}>
+                  #{issue}
+                </a>{' '}
+                created — tell Cursor to investigate that issue.
+              </>
+            ) : null}
+            {gh === 'unconfigured' ? (
+              <>
+                {' '}
+                <span style={{ color: '#fde68a' }}>
+                  No GitHub issue (set GITHUB_TOKEN + GITHUB_REPO in the environment).
+                </span>
+              </>
+            ) : null}
+            {gh === 'error' ? (
+              <>
+                {' '}
+                <span style={{ color: '#fca5a5' }}>
+                  GitHub issue failed — check server logs / token permissions (Issues: write).
+                </span>
+              </>
+            ) : null}
             {reportedUrl ? (
               <>
                 {' '}
@@ -116,6 +160,15 @@ reportsRoute.get('/reports', async (c) => {
                   <span>{new Date(r.reportedAt).toLocaleString()}</span>
                   <span>JS {r.settings.disableJs ? 'off' : 'on'}</span>
                   <span>Bypass {r.settings.bypassAdblockDetection ? 'on' : 'off'}</span>
+                  {r.githubIssueUrl ? (
+                    <a href={r.githubIssueUrl} style={{ color: 'var(--accent)' }}>
+                      GitHub #{r.githubIssueNumber}
+                    </a>
+                  ) : r.githubError ? (
+                    <span style={{ color: '#fca5a5' }} title={r.githubError}>
+                      No GitHub issue
+                    </span>
+                  ) : null}
                 </div>
                 {r.note ? (
                   <p style={{ margin: '10px 0 0', fontSize: '13px', color: 'var(--text-main)' }}>
