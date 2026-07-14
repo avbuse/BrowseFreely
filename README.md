@@ -28,20 +28,42 @@ A fast, modern, and lightweight web proxy/browser built with **Bun**, **Hono**, 
 
 ## 🐳 Docker Deployment (Recommended)
 
-You can run BrowseFreely instantly using Docker.
+Images are built by GitHub Actions and published to **GitHub Container Registry**:
+
+```text
+ghcr.io/avbuse/browsefreely:latest
+```
+
+Other tags: `sha-<commit>` on every `main` push, and `vX.Y.Z` when you push a version tag.
 
 ### Option 1: Using Docker Compose
-Simply download the `docker-compose.yml` file from this repository and run:
+Download the `docker-compose.yml` from this repository, set a real `SESSION_SECRET`, then run:
 ```bash
-docker-compose up -d
+# Only needed if the GHCR package is private:
+# echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+
+docker compose up -d
 ```
 
 ### Option 2: Using Docker Run
 ```bash
-docker run -d -p 3000:3000 -e RATE_LIMIT=100 --name browsefreely --restart unless-stopped vinitkumargoel/browsefreely:latest
+docker run -d -p 3000:3000 \
+  -e RATE_LIMIT=100 \
+  -e SESSION_SECRET=change-me-to-a-long-random-string \
+  --name browsefreely \
+  --restart unless-stopped \
+  ghcr.io/avbuse/browsefreely:latest
+```
+
+### Build locally
+```bash
+docker build -t browsefreely:local .
+docker run -d -p 3000:3000 -e SESSION_SECRET=dev ghcr.io/avbuse/browsefreely:latest
 ```
 
 Navigate to `http://localhost:3000` and start browsing!
+
+> **Note:** After the first successful Actions run on `main`, open the package under the repo’s **Packages** tab and set visibility to **Public** if you want pull-without-login.
 
 ## 📦 Native Installation & Setup
 

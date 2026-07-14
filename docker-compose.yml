@@ -1,9 +1,15 @@
-version: '3.8'
+# BrowseFreely — pull the image built by GitHub Actions (GHCR)
+#
+# Image: ghcr.io/avbuse/browsefreely:latest
+# (also tagged as :sha-<commit> on every main push, and :vX.Y.Z on version tags)
+#
+# First-time / private package pull:
+#   echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+# If the package is public, no login is required.
 
 services:
   browsefreely:
-    build: .
-    image: vinitkumargoel/browsefreely:latest
+    image: ghcr.io/avbuse/browsefreely:latest
     container_name: browsefreely
     ports:
       - "3000:3000"
