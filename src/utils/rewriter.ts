@@ -3,6 +3,9 @@ import { TopBar } from '../components/TopBar'
 import { FINGERPRINT_SPOOF_SCRIPT } from './fingerprint'
 import {
   ANTI_ADBLOCK_STUB_SCRIPT,
+  CLEANUP_CSS,
+  applyHtmlFilters,
+  buildCosmeticObserverScript,
   getCosmeticsForUrl,
 } from './adblocker'
 
@@ -15,15 +18,22 @@ function escapeForJsString(value: string): string {
     .replace(/<\//g, '<\\/')
 }
 
-export function rewriteHtml(
+export async function rewriteHtml(
   htmlStream: ReadableStream | Response,
   baseUrl: string,
   disableJs: boolean,
   bypassAdblockDetection: boolean = true
-): Response {
+): Promise<Response> {
   const topBarHtml = TopBar({ currentUrl: baseUrl, disableJs }).toString()
   const safeBaseUrl = escapeForJsString(baseUrl)
-  const cosmetics = bypassAdblockDetection ? getCosmeticsForUrl(baseUrl) : { styles: '', scripts: [] }
+
+  // Always apply cosmetic ad-hiding; anti-adblock stubs/scriptlets are optional
+  const cosmetics = getCosmeticsForUrl(baseUrl)
+
+  // Buffer HTML so we can run Ghostery HTML filters (script-tag removal etc.)
+  const source = htmlStream instanceof Response ? htmlStream : new Response(htmlStream)
+  let html = await source.text()
+  html = applyHtmlFilters(baseUrl, html)
 
   const rewriter = new HTMLRewriter()
 
@@ -37,10 +47,12 @@ export function rewriteHtml(
   rewriter.on('head', {
     element(el) {
       el.append('<style>body { margin-top: 48px !important; }</style>', { html: true })
+      el.append(`<style data-bf-cleanup>${CLEANUP_CSS}</style>`, { html: true })
 
       if (cosmetics.styles) {
-        // Cosmetic hide rules from filter lists (includes many anti-adblock overlays)
-        el.append(`<style data-bf-cosmetics>${cosmetics.styles}</style>`, { html: true })
+        el.append(`<style data-bf-cosmetics id="bf-cosmetics-live">${cosmetics.styles}</style>`, {
+          html: true,
+        })
       }
 
       if (!disableJs) {
@@ -51,6 +63,11 @@ export function rewriteHtml(
           for (const s of cosmetics.scripts) {
             scriptParts.push(s)
           }
+        }
+
+        // Keep cosmetic CSS alive as SPAs inject new DOM
+        if (cosmetics.styles) {
+          scriptParts.push(buildCosmeticObserverScript(cosmetics.styles))
         }
 
         scriptParts.push(`
@@ -66,7 +83,7 @@ export function rewriteHtml(
           })();
         `)
 
-        el.append(`<script data-bf-inject>${scriptParts.join('\n')}</script>`, { html: true })
+        el.prepend(`<script data-bf-inject>${scriptParts.join('\n')}</script>`, { html: true })
       }
     },
   })
@@ -122,6 +139,7 @@ export function rewriteHtml(
       if (src) {
         const absolute = resolveUrl(baseUrl, src)
         if (absolute.startsWith('http') && !absolute.includes('/asset?url=')) {
+          // Drop known ad iframes/images at rewrite time when we can
           el.setAttribute(srcAttr, `/asset?url=${encodeURIComponent(absolute)}`)
         } else {
           el.setAttribute(srcAttr, absolute)
@@ -151,5 +169,11 @@ export function rewriteHtml(
     })
   }
 
-  return rewriter.transform(htmlStream instanceof Response ? htmlStream : new Response(htmlStream))
+  return rewriter.transform(
+    new Response(html, {
+      status: source.status,
+      statusText: source.statusText,
+      headers: source.headers,
+    })
+  )
 }
