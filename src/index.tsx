@@ -52,16 +52,60 @@ app.get('*', (c) => {
       const urlParam = new URL(referer).searchParams.get('url')
       if (urlParam) {
         let intendedUrl = new URL(c.req.path, urlParam).href
-        if (c.req.query()) {
-          const qs = new URLSearchParams(c.req.query()).toString()
-          if (qs) {
-            intendedUrl += '?' + qs
+        const reqUrl = new URL(c.req.url)
+        if (reqUrl.search) {
+          // Preserve query string from the breakout request (/search?q=cats)
+          const intended = new URL(intendedUrl)
+          for (const [k, v] of reqUrl.searchParams.entries()) {
+            intended.searchParams.append(k, v)
           }
+          intendedUrl = intended.href
         }
-        return c.redirect(`/asset?url=${encodeURIComponent(intendedUrl)}`)
+
+        const dest = (c.req.header('sec-fetch-dest') || '').toLowerCase()
+        const accept = (c.req.header('accept') || '').toLowerCase()
+        const isDocument =
+          dest === 'document' ||
+          ((dest === '' || dest === 'empty') && accept.includes('text/html'))
+
+        // HTML navigations must go through /browse (rewrites + TopBar).
+        // Subresources go through /asset.
+        const path = isDocument ? '/browse' : '/asset'
+        return c.redirect(`${path}?url=${encodeURIComponent(intendedUrl)}`)
       }
     } catch {
       // Ignore URL parsing errors
+    }
+  }
+  return c.text('Not Found', 404)
+})
+
+// Relative form POSTs that escape rewriting (e.g. action="/search")
+app.post('*', async (c) => {
+  if (c.req.path.startsWith('/api/') || c.req.path === '/browse') {
+    return c.text('Not Found', 404)
+  }
+  const referer = c.req.header('referer')
+  if (referer && referer.includes('/browse?url=')) {
+    try {
+      const urlParam = new URL(referer).searchParams.get('url')
+      if (urlParam) {
+        const intendedUrl = new URL(c.req.path, urlParam).href
+        // Rebuild as GET-style browse POST by forwarding to /browse?url=
+        const browseUrl = `/browse?url=${encodeURIComponent(intendedUrl)}`
+        const body = await c.req.arrayBuffer()
+        const headers = new Headers(c.req.raw.headers)
+        headers.delete('host')
+        // Internal re-dispatch
+        const internal = new Request(new URL(browseUrl, c.req.url).href, {
+          method: 'POST',
+          headers,
+          body,
+        })
+        return app.fetch(internal)
+      }
+    } catch {
+      // ignore
     }
   }
   return c.text('Not Found', 404)

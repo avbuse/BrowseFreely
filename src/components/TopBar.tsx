@@ -1,16 +1,17 @@
 export const TopBar = ({ currentUrl, disableJs }: { currentUrl: string, disableJs: boolean }) => {
   return (
     <div
+      data-bf-topbar="1"
       style={{
         position: 'fixed',
         top: 0,
         left: 0,
         width: '100%',
         height: '48px',
-        backgroundColor: 'rgba(9, 9, 11, 0.85)',
+        backgroundColor: 'rgba(9, 9, 11, 0.92)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
-        zIndex: 999999,
+        zIndex: 2147483647,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -48,11 +49,11 @@ export const TopBar = ({ currentUrl, disableJs }: { currentUrl: string, disableJ
             @media (min-width: 600px) {
               .brand-text { display: inline !important; }
               .js-text { display: inline !important; }
-              .report-text { display: inline !important; }
             }
+            .report-text { display: inline !important; }
             @media (max-width: 599px) {
               .js-text { display: none !important; }
-              .report-text { display: none !important; }
+              .report-text { font-size: 11px !important; }
             }
           ` }} />
         </a>
@@ -138,7 +139,7 @@ export const TopBar = ({ currentUrl, disableJs }: { currentUrl: string, disableJ
               <line x1="12" y1="9" x2="12" y2="13"></line>
               <line x1="12" y1="17" x2="12.01" y2="17"></line>
             </svg>
-            <span className="report-text">Site broken?</span>
+            <span className="report-text">Report</span>
           </button>
         </form>
 
