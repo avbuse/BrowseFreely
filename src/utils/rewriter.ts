@@ -1,9 +1,29 @@
 import { resolveUrl } from './url'
 import { TopBar } from '../components/TopBar'
 import { FINGERPRINT_SPOOF_SCRIPT } from './fingerprint'
+import {
+  ANTI_ADBLOCK_STUB_SCRIPT,
+  getCosmeticsForUrl,
+} from './adblocker'
 
-export function rewriteHtml(htmlStream: ReadableStream | Response, baseUrl: string, disableJs: boolean): Response {
+function escapeForJsString(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/<\//g, '<\\/')
+}
+
+export function rewriteHtml(
+  htmlStream: ReadableStream | Response,
+  baseUrl: string,
+  disableJs: boolean,
+  bypassAdblockDetection: boolean = true
+): Response {
   const topBarHtml = TopBar({ currentUrl: baseUrl, disableJs }).toString()
+  const safeBaseUrl = escapeForJsString(baseUrl)
+  const cosmetics = bypassAdblockDetection ? getCosmeticsForUrl(baseUrl) : { styles: '', scripts: [] }
 
   const rewriter = new HTMLRewriter()
 
@@ -11,47 +31,61 @@ export function rewriteHtml(htmlStream: ReadableStream | Response, baseUrl: stri
     element(el) {
       el.prepend(topBarHtml, { html: true })
       el.prepend('<div style="height: 48px; width: 100%;"></div>', { html: true })
-    }
+    },
   })
 
   rewriter.on('head', {
     element(el) {
       el.append('<style>body { margin-top: 48px !important; }</style>', { html: true })
-      // NextJS / React interceptor for fetch and dynamic imports that break out of BrowseFreely
-      el.append(`
-        <script>
-          ${FINGERPRINT_SPOOF_SCRIPT}
+
+      if (cosmetics.styles) {
+        // Cosmetic hide rules from filter lists (includes many anti-adblock overlays)
+        el.append(`<style data-bf-cosmetics>${cosmetics.styles}</style>`, { html: true })
+      }
+
+      if (!disableJs) {
+        const scriptParts: string[] = [FINGERPRINT_SPOOF_SCRIPT]
+
+        if (bypassAdblockDetection) {
+          scriptParts.push(ANTI_ADBLOCK_STUB_SCRIPT)
+          for (const s of cosmetics.scripts) {
+            scriptParts.push(s)
+          }
+        }
+
+        scriptParts.push(`
           (function() {
             const originalFetch = window.fetch;
+            const base = '${safeBaseUrl}';
             window.fetch = function() {
               if (typeof arguments[0] === 'string' && arguments[0].startsWith('/')) {
-                arguments[0] = '/asset?url=' + encodeURIComponent(new URL(arguments[0], '${baseUrl}').href);
+                arguments[0] = '/asset?url=' + encodeURIComponent(new URL(arguments[0], base).href);
               }
               return originalFetch.apply(this, arguments);
             };
           })();
-        </script>
-      `, { html: true })
-    }
+        `)
+
+        el.append(`<script data-bf-inject>${scriptParts.join('\n')}</script>`, { html: true })
+      }
+    },
   })
 
-  // Strip JS if requested
   if (disableJs) {
     rewriter.on('script', {
       element(el) {
-        el.remove();
-      }
+        el.remove()
+      },
     })
   }
 
   rewriter.on('a', {
     element(el) {
       const href = el.getAttribute('href')
-      // Let the native proxy TopBar links bypass the rewriter completely!
       if (el.hasAttribute('data-native-proxy-link')) {
-        return;
+        return
       }
-      
+
       if (href) {
         const absolute = resolveUrl(baseUrl, href)
         if (absolute.startsWith('http') && !absolute.includes('/browse?url=')) {
@@ -60,16 +94,15 @@ export function rewriteHtml(htmlStream: ReadableStream | Response, baseUrl: stri
           el.setAttribute('href', absolute)
         }
       }
-    }
+    },
   })
 
   rewriter.on('form', {
     element(el) {
-      // Let native proxy forms bypass the rewriter completely
       if (el.hasAttribute('data-native-proxy-form')) {
-        return;
+        return
       }
-      
+
       const action = el.getAttribute('action')
       if (action) {
         const absolute = resolveUrl(baseUrl, action)
@@ -79,7 +112,7 @@ export function rewriteHtml(htmlStream: ReadableStream | Response, baseUrl: stri
       } else {
         el.setAttribute('action', `/browse?url=${encodeURIComponent(baseUrl)}`)
       }
-    }
+    },
   })
 
   rewriter.on('img, iframe, source, track, link', {
@@ -94,14 +127,14 @@ export function rewriteHtml(htmlStream: ReadableStream | Response, baseUrl: stri
           el.setAttribute(srcAttr, absolute)
         }
       }
-      
+
       const srcset = el.getAttribute('srcset')
       if (srcset) {
         el.removeAttribute('srcset')
       }
-    }
+    },
   })
-  
+
   if (!disableJs) {
     rewriter.on('script', {
       element(el) {
@@ -114,7 +147,7 @@ export function rewriteHtml(htmlStream: ReadableStream | Response, baseUrl: stri
             el.setAttribute('src', absolute)
           }
         }
-      }
+      },
     })
   }
 

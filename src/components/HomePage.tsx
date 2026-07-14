@@ -264,6 +264,52 @@ export const HomePage = ({ settings }: { settings: UserSettings }) => {
               </label>
             </div>
 
+            <div style={{ height: '1px', background: 'var(--border)', width: '100%' }}></div>
+
+            {/* Anti-adblock bypass */}
+            <div>
+              <label style={{ 
+                display: 'flex', 
+                alignItems: 'flex-start', 
+                gap: '12px', 
+                cursor: 'pointer', 
+                userSelect: 'none' 
+              }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginTop: '2px' }}>
+                  <input type="checkbox" name="bypassAdblockDetection" value="true" defaultChecked={settings.bypassAdblockDetection} style={{
+                    appearance: 'none',
+                    width: '20px', 
+                    height: '20px', 
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    background: 'var(--bg-color)',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    transition: 'all 0.2s ease'
+                  }} 
+                  className="custom-checkbox"
+                  />
+                  <svg className="check-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{
+                    position: 'absolute',
+                    left: '4px',
+                    pointerEvents: 'none',
+                    opacity: settings.bypassAdblockDetection ? 1 : 0,
+                    transition: 'opacity 0.2s ease'
+                  }}>
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                </div>
+                <div>
+                  <span style={{ display: 'block', fontSize: '14px', fontWeight: 500, color: 'var(--text-main)', marginBottom: '4px' }}>
+                    Bypass adblock detection
+                  </span>
+                  <span style={{ display: 'block', fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    Injects cosmetic filters and stubs common “please disable your adblocker” checks so pages still render after ads are stripped.
+                  </span>
+                </div>
+              </label>
+            </div>
+
           </div>
         </form>
 
@@ -288,7 +334,7 @@ export const HomePage = ({ settings }: { settings: UserSettings }) => {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-main)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l8.58-8.58c.94-.94.94-2.48 0-3.42L12 2Z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
             </div>
             <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 8px 0', letterSpacing: '-0.01em' }}>Session & Cookies</h3>
-            <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-muted)', lineHeight: 1.5 }}>Proxied cookies are kept in a secure session jar. Clear your session with one click.</p>
+            <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-muted)', lineHeight: 1.5 }}>Proxied cookies are AES-GCM encrypted and bound to your session + IP. Clear them with one click.</p>
           </div>
           <div>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', border: '1px solid var(--border)' }}>
