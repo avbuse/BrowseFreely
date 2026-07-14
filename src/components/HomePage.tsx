@@ -335,6 +335,9 @@ export const HomePage = ({ settings }: { settings: UserSettings }) => {
             </div>
             <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 8px 0', letterSpacing: '-0.01em' }}>Session & Cookies</h3>
             <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-muted)', lineHeight: 1.5 }}>Proxied cookies are AES-GCM encrypted and bound to your session + IP. Clear them with one click.</p>
+            <p style={{ margin: '10px 0 0', fontSize: '13px' }}>
+              <a href="/reports" style={{ color: 'var(--accent)' }}>View broken-site reports →</a>
+            </p>
           </div>
           <div>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', border: '1px solid var(--border)' }}>

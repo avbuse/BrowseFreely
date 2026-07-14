@@ -18,8 +18,15 @@ services:
       - PORT=3000
       - RATE_LIMIT=100
       - SESSION_SECRET=change-me-to-a-long-random-string
+      # Required for "Site broken?" → GitHub issue (Cursor can then investigate the issue)
+      # - GITHUB_TOKEN=ghp_xxxxxxxx
+      # - GITHUB_REPO=avbuse/BrowseFreely
+      # - GITHUB_ISSUE_LABELS=broken-site,anti-adblock
       # - TRUST_PROXY=false
       # - ALLOW_PRIVATE_TARGETS=false
       # - INSECURE_TLS=false
       # - SECURE_COOKIES=false
+    volumes:
+      # Persist "Site broken?" reports across container restarts
+      - ./data:/app/data
     restart: unless-stopped
