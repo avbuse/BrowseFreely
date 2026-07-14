@@ -33,3 +33,9 @@ pnpm-debug.log*
 dist/
 out.js
 build/
+
+# CI / docs noise
+.github/
+*.md
+!README.md
+

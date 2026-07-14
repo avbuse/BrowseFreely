@@ -10,11 +10,12 @@ A fast, modern, and lightweight web proxy/browser built with **Bun**, **Hono**, 
   - **User-Agent Spoofing:** Select your desired device identity directly from the homepage.
   - **Canvas Spoofing:** Injects client-side scripts to invisibly alter Canvas API readouts, preventing trackers from fingerprinting your specific hardware.
   - **WebRTC Protection:** Blocks WebRTC IP leak loopholes on the client-side.
-- 🍪 **Encrypted Session Jar**: Log into websites *through* the proxy! Cookies are intercepted, held securely in an in-memory session jar on the server, and automatically injected into subsequent requests without ever hitting your local machine.
+- 🍪 **Encrypted Session Jar**: Log into websites *through* the proxy. Site cookies are AES-256-GCM encrypted in memory, keyed by your `bf_session` cookie **and** source IP, and never written to your browser.
 - 📖 **Reader Mode (NoScript)**: Instantly strip all JavaScript from a proxied page for maximum speed, security, and easy reading.
-- ⚡ **Asset Caching**: Includes a built-in LRU cache to serve repeated static assets (fonts, images) directly from memory, drastically reducing outbound bandwidth.
+- ⚡ **Asset Caching**: Includes a built-in LRU cache (partitioned per session) to serve repeated static assets directly from memory.
 - 🧩 **SPA Compatibility**: Includes custom fetch interceptors and catch-all routing to support React, Next.js, and other modern Single Page Applications that typically break inside standard proxies.
-- 🔒 **Security First**: Built-in SSRF (Server-Side Request Forgery) protection to prevent access to local and private IP addresses, plus active Rate Limiting.
+- 🚫 **Anti-adblock bypass**: Cosmetic filters + detection stubs help pages render even when sites try to block adblock users.
+- 🔒 **Security First**: SSRF protection with redirect re-checks, optional LAN targeting, TLS verification on by default, plus rate limiting.
 - 💅 **Modern UI**: Clean, minimalistic, dark-mode native interface using server-rendered JSX.
 
 ## 🛠️ Tech Stack
@@ -27,20 +28,42 @@ A fast, modern, and lightweight web proxy/browser built with **Bun**, **Hono**, 
 
 ## 🐳 Docker Deployment (Recommended)
 
-You can run BrowseFreely instantly using Docker.
+Images are built by GitHub Actions and published to **GitHub Container Registry**:
+
+```text
+ghcr.io/avbuse/browsefreely:latest
+```
+
+Other tags: `sha-<commit>` on every `main` push, and `vX.Y.Z` when you push a version tag.
 
 ### Option 1: Using Docker Compose
-Simply download the `docker-compose.yml` file from this repository and run:
+Download the `docker-compose.yml` from this repository, set a real `SESSION_SECRET`, then run:
 ```bash
-docker-compose up -d
+# Only needed if the GHCR package is private:
+# echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+
+docker compose up -d
 ```
 
 ### Option 2: Using Docker Run
 ```bash
-docker run -d -p 3000:3000 -e RATE_LIMIT=100 --name browsefreely --restart unless-stopped vinitkumargoel/browsefreely:latest
+docker run -d -p 3000:3000 \
+  -e RATE_LIMIT=100 \
+  -e SESSION_SECRET=change-me-to-a-long-random-string \
+  --name browsefreely \
+  --restart unless-stopped \
+  ghcr.io/avbuse/browsefreely:latest
+```
+
+### Build locally
+```bash
+docker build -t browsefreely:local .
+docker run -d -p 3000:3000 -e SESSION_SECRET=dev ghcr.io/avbuse/browsefreely:latest
 ```
 
 Navigate to `http://localhost:3000` and start browsing!
+
+> **Note:** After the first successful Actions run on `main`, open the package under the repo’s **Packages** tab and set visibility to **Public** if you want pull-without-login.
 
 ## 📦 Native Installation & Setup
 
@@ -84,6 +107,11 @@ You can configure BrowseFreely by creating a `.env` file or passing environment 
 * `PORT` - The port the proxy server listens on (Default: `3000`)
 * `NODE_ENV` - Set to `production` for optimized performance
 * `RATE_LIMIT` - Max requests per minute per IP address (Default: `100`)
+* `SESSION_SECRET` - Long random string used to encrypt the in-memory cookie jar (required for stable sessions across restarts)
+* `SECURE_COOKIES` - `true`/`false` to force the Secure cookie flag (default: Secure only when serving HTTPS)
+* `TRUST_PROXY` - `true` to trust `X-Forwarded-For` / `CF-Connecting-IP` (default: `false`; use only behind a trusted proxy)
+* `ALLOW_PRIVATE_TARGETS` - `true` to allow proxying LAN/private IPs (default: `false`)
+* `INSECURE_TLS` - `true` to skip upstream TLS verification (default: `false`)
 
 ## 🚀 Production Native Deployment
 

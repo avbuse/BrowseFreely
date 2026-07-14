@@ -1,16 +1,24 @@
 import { Hono } from 'hono'
-import { isValidUrl, isPrivateIP, ensureUrl } from '../utils/url'
+import { isValidUrl, isPrivateIP, ensureUrl, safeFetch, tlsOptions } from '../utils/url'
 import { isAd } from '../utils/adblocker'
 import { getSettings } from '../utils/settings'
-import { getSessionId, getCookiesForDomain, saveCookiesFromResponse } from '../utils/session'
-import { assetCache } from '../utils/cache'
+import {
+  getCookiesForRequest,
+  saveCookiesFromResponse,
+  responseLooksPrivate,
+  getSessionId,
+} from '../utils/session'
+import { assetCache, cacheKey, isLikelyPublicAsset } from '../utils/cache'
+import { getClientIp } from '../utils/clientIp'
+import { storageKeyFor } from '../utils/crypto'
+import { mergeContextResponse } from '../utils/response'
 
 export const assetRoute = new Hono()
 
 assetRoute.get('/asset', async (c) => {
   const urlParam = c.req.query('url')
   const referer = c.req.header('referer') || 'https://browsefreely.test'
-  
+
   if (!urlParam) {
     return c.text('URL is required', 400)
   }
@@ -25,47 +33,56 @@ assetRoute.get('/asset', async (c) => {
     return c.text('Forbidden URL', 403)
   }
 
-  if (isAd(targetUrl, referer)) {
-    return c.text('', 403) // Empty response for blocked trackers/ads
+  if (isAd(targetUrl, referer, c.req.header('accept'))) {
+    return c.text('', 403)
   }
 
-  // Check cache first
-  const cached = assetCache.get(targetUrl);
+  const sid = getSessionId(c)
+  const ip = getClientIp(c)
+  const sessionKey = await storageKeyFor(sid, ip)
+  const keyed = cacheKey(sessionKey, targetUrl)
+
+  const cached = assetCache.get(keyed)
   if (cached) {
-    return new Response(cached.buffer, {
-      status: 200,
-      headers: {
-        'Content-Type': cached.contentType,
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=3600'
-      }
-    });
+    return mergeContextResponse(
+      c,
+      new Response(cached.buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': cached.contentType,
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'private, max-age=3600',
+        },
+      })
+    )
   }
 
-  const settings = getSettings(c);
-  const sessionId = getSessionId(c);
-  const targetDomain = new URL(targetUrl).hostname;
-  const proxyCookies = getCookiesForDomain(sessionId, targetDomain);
+  const settings = getSettings(c)
+  const targetDomain = new URL(targetUrl).hostname
+  const proxyCookies = await getCookiesForRequest(c, targetDomain)
 
   try {
     const fetchHeaders: Record<string, string> = {
       'User-Agent': settings.userAgent,
-      'Accept': '*/*',
+      Accept: '*/*',
       'Accept-Language': 'en-US,en;q=0.5',
-    };
-
-    if (proxyCookies) {
-      fetchHeaders['Cookie'] = proxyCookies;
     }
 
-    const response = await fetch(targetUrl, {
-      method: 'GET',
-      headers: fetchHeaders,
-      redirect: 'follow',
-      tls: { rejectUnauthorized: false }
-    })
-    
-    saveCookiesFromResponse(sessionId, targetDomain, response);
+    if (proxyCookies) {
+      fetchHeaders['Cookie'] = proxyCookies
+    }
+
+    const { response } = await safeFetch(
+      targetUrl,
+      {
+        method: 'GET',
+        headers: fetchHeaders,
+        tls: tlsOptions(),
+      },
+      async (hopUrl, hopResponse) => {
+        await saveCookiesFromResponse(c, new URL(hopUrl).hostname, hopResponse)
+      }
+    )
 
     const cleanHeaders = new Headers(response.headers)
     cleanHeaders.delete('content-encoding')
@@ -75,25 +92,33 @@ assetRoute.get('/asset', async (c) => {
     cleanHeaders.delete('content-security-policy')
     cleanHeaders.delete('x-frame-options')
     cleanHeaders.delete('set-cookie')
-    
+
     cleanHeaders.set('Access-Control-Allow-Origin', '*')
 
     const buffer = await response.arrayBuffer()
-    
-    const contentType = response.headers.get('content-type') || 'application/octet-stream';
-    
-    // Only cache successful GET responses that aren't huge (size limit handled by LRUCache)
-    if (response.status === 200) {
-      assetCache.set(targetUrl, { buffer, contentType });
+    const contentType = response.headers.get('content-type') || 'application/octet-stream'
+
+    const privateResponse = responseLooksPrivate(response, !!proxyCookies)
+    if (
+      response.status === 200 &&
+      !privateResponse &&
+      isLikelyPublicAsset(contentType, targetUrl)
+    ) {
+      assetCache.set(keyed, { buffer, contentType })
     }
 
-    return new Response(buffer, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: cleanHeaders
-    })
-
+    return mergeContextResponse(
+      c,
+      new Response(buffer, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: cleanHeaders,
+      })
+    )
   } catch (e: any) {
+    if (e?.message === 'Forbidden URL (SSRF protection)') {
+      return c.text('Forbidden URL', 403)
+    }
     return c.text(`Asset fetch failed: ${e.message}`, 500)
   }
 })
