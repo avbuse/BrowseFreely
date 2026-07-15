@@ -129,9 +129,68 @@ export function htmlEnablesAdShield(html: string): boolean {
   return /"adShield"\s*:\s*\{\s*"enabled"\s*:\s*true/i.test(html)
 }
 
+/**
+ * Flip Future plc `"adShield":{"enabled":true}` so the page never arms detection.
+ * Prefer this over fighting the detector — if the flag is off, Ads/Ad-Shield stay idle.
+ */
+export function neutralizeAdShieldConfig(html: string): string {
+  return html.replace(
+    /"adShield"\s*:\s*\{\s*"enabled"\s*:\s*true(\s*\})/gi,
+    '"adShield":{"enabled":false$1'
+  )
+}
+
+/** Resolve proxied `/asset?url=` back to the upstream URL for matching. */
+function upstreamFromSrc(src: string): string {
+  try {
+    if (src.includes('/asset?url=')) {
+      const q = src.split('/asset?url=')[1]?.split(/[&"']/)[0]
+      if (q) return decodeURIComponent(q)
+    }
+  } catch {
+    /* ignore */
+  }
+  return src
+}
+
+/**
+ * Future / Ad-Shield loader scripts — remove from the rewritten document so
+ * detection never executes (network blocking alone can still trip integrity checks).
+ */
+export function isAdShieldLoaderUrl(src: string | null | undefined): boolean {
+  if (!src) return false
+  const u = upstreamFromSrc(src).toLowerCase()
+  return (
+    /\/vite\/assets\/ads\/ads\.ts/i.test(u) ||
+    /\/ads\/ads\.ts-/i.test(u) ||
+    /bordeaux\.futurecdn\.net/i.test(u) ||
+    /freyr\.futurecdn\.net/i.test(u) ||
+    /vanir\.futurecdn\.net/i.test(u) ||
+    /ad-?shield\.(io|de|info|club)/i.test(u) ||
+    /cdn\.jsdelivr\.net\/(?:npm\/)?protected-reward-ad/i.test(u) ||
+    /cdn\.jsdelivr\.net\/gh\/ad-shield/i.test(u) ||
+    /refitted\.net/i.test(u) ||
+    /(?:html|css|content)-load\.com/i.test(u) ||
+    /feload\.com/i.test(u) ||
+    /22pixx\.xyz/i.test(u)
+  )
+}
+
+export function shouldInjectAdShieldPrep(pageUrl: string, html: string): boolean {
+  return hostnameMatchesAdShield(pageUrl) || htmlEnablesAdShield(html) || /"adShield"\s*:/i.test(html)
+}
+
+/**
+ * tinyShield is a fallback only: after we strip loaders + disable the config flag,
+ * most Future pages don't need it. Force with FORCE_TINYSHIELD=true; skip with DISABLE_TINYSHIELD.
+ */
 export function shouldInjectTinyShield(pageUrl: string, html: string): boolean {
   if (process.env.DISABLE_TINYSHIELD === 'true') return false
-  return hostnameMatchesAdShield(pageUrl) || htmlEnablesAdShield(html)
+  if (process.env.FORCE_TINYSHIELD === 'true') {
+    return hostnameMatchesAdShield(pageUrl) || htmlEnablesAdShield(html) || /"adShield"\s*:/i.test(html)
+  }
+  // Fallback when config flip didn't take (obfuscated / unexpected shape)
+  return htmlEnablesAdShield(html)
 }
 
 /**

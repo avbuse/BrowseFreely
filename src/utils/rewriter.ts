@@ -11,6 +11,9 @@ import {
 import { buildNavigationGuardScript } from './navigationGuard'
 import {
   FUTURE_ADSHIELD_PREP_SCRIPT,
+  isAdShieldLoaderUrl,
+  neutralizeAdShieldConfig,
+  shouldInjectAdShieldPrep,
   shouldInjectTinyShield,
 } from './tinyshield'
 
@@ -37,6 +40,11 @@ export async function rewriteHtml(
   const source = htmlStream instanceof Response ? htmlStream : new Response(htmlStream)
   let html = await source.text()
   html = applyHtmlFilters(baseUrl, html)
+
+  // Prefer removing Ad-Shield / Future detection over fighting it in-page.
+  if (bypassAdblockDetection) {
+    html = neutralizeAdShieldConfig(html)
+  }
 
   const rewriter = new HTMLRewriter()
   let topBarInjected = false
@@ -80,6 +88,8 @@ export async function rewriteHtml(
     },
   })
 
+  const injectAdShieldPrep =
+    !disableJs && bypassAdblockDetection && shouldInjectAdShieldPrep(baseUrl, html)
   const injectTinyShield =
     !disableJs && bypassAdblockDetection && shouldInjectTinyShield(baseUrl, html)
 
@@ -106,8 +116,7 @@ export async function rewriteHtml(
         ]
 
         if (bypassAdblockDetection) {
-          if (injectTinyShield) {
-            // Must run before page Ad-Shield scripts; tinyShield follows as external src.
+          if (injectAdShieldPrep || injectTinyShield) {
             scriptParts.push(FUTURE_ADSHIELD_PREP_SCRIPT)
           }
           scriptParts.push(ANTI_ADBLOCK_STUB_SCRIPT)
@@ -144,7 +153,7 @@ export async function rewriteHtml(
           })();
         `)
 
-        // Prepend so BF + tinyShield run before site scripts in <head>
+        // tinyShield only as fallback when config flip failed (or FORCE_TINYSHIELD)
         if (injectTinyShield) {
           el.prepend(
             '<script data-bf-tinyshield src="/bf/tinyshield.js"></script>',
@@ -217,6 +226,18 @@ export async function rewriteHtml(
 
   rewriter.on('img, iframe, source, track, link', {
     element(el) {
+      const tag = el.tagName.toLowerCase()
+      if (tag === 'link' && bypassAdblockDetection) {
+        const rel = (el.getAttribute('rel') || '').toLowerCase()
+        if (
+          (rel.includes('modulepreload') || rel.includes('preload') || rel.includes('prefetch')) &&
+          isAdShieldLoaderUrl(el.getAttribute('href'))
+        ) {
+          el.remove()
+          return
+        }
+      }
+
       const srcAttr = el.hasAttribute('src') ? 'src' : 'href'
       const src = el.getAttribute(srcAttr)
       if (src) {
@@ -246,6 +267,11 @@ export async function rewriteHtml(
           return
         }
         const src = el.getAttribute('src')
+        // Strip Ad-Shield / Future ad loaders so detection never runs
+        if (bypassAdblockDetection && isAdShieldLoaderUrl(src)) {
+          el.remove()
+          return
+        }
         if (src) {
           // Never proxy our first-party /bf/* helpers through /asset
           if (src.startsWith('/bf/')) return
