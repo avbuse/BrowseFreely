@@ -240,10 +240,13 @@ export async function rewriteHtml(
         '<style data-bf-chrome>body { margin-top: 48px !important; } [data-bf-topbar]{ z-index:2147483647 !important; }</style>',
         { html: true }
       )
+      // Always inject reveal — WSJ soft walls use mask fades on normal 200 pages.
+      // Cleanup ads can stay off during pure captcha interstitials.
       if (!botChallenge) {
         el.append(`<style data-bf-cleanup>${CLEANUP_CSS}</style>`, { html: true })
-        el.append(`<style data-bf-reveal>${CONTENT_REVEAL_CSS}</style>`, { html: true })
       }
+      el.append(`<style data-bf-reveal>${CONTENT_REVEAL_CSS}</style>`, { html: true })
+
 
       if (cosmetics.styles) {
         el.append(`<style data-bf-cosmetics id="bf-cosmetics-live">${cosmetics.styles}</style>`, {
@@ -265,17 +268,17 @@ export async function rewriteHtml(
           scriptParts.push(FINGERPRINT_SPOOF_SCRIPT)
         }
 
+        // Always clear soft-paywall fades (mask-image), even on DD hosts
+        scriptParts.push(CONTENT_REVEAL_SCRIPT)
+
         if (bypassAdblockDetection && !botChallenge) {
           if (injectAdShieldPrep || injectTinyShield) {
             scriptParts.push(FUTURE_ADSHIELD_PREP_SCRIPT)
           }
           scriptParts.push(ANTI_ADBLOCK_STUB_SCRIPT)
-          scriptParts.push(CONTENT_REVEAL_SCRIPT)
           for (const s of cosmetics.scripts) {
             scriptParts.push(s)
           }
-        } else if (!botChallenge) {
-          scriptParts.push(CONTENT_REVEAL_SCRIPT)
         }
 
         if (cosmetics.styles) {
