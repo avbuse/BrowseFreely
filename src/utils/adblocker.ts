@@ -263,8 +263,15 @@ export function getCosmeticsForUrl(pageUrl: string): CosmeticPayload {
       getRulesFromHostname: true,
     })
 
+    // Never let list cosmetics re-hide article bodies wrapped in .paywall
+    let styles = result.styles || ''
+    styles = styles
+      .split('\n')
+      .filter((line) => !/\.paywall\b|\[class\*="?paywall/i.test(line))
+      .join('\n')
+
     return {
-      styles: result.styles || '',
+      styles,
       scripts: result.scripts || [],
     }
   } catch {
@@ -311,10 +318,10 @@ ins.adsbygoogle,
 [data-ad-slot],
 [data-google-query-id],
 .ad-banner, .adbanner, .adsbox, .ad-container, .ads-container,
-#ad-banner, #ads, #ad, #advertisement,
+#ad-banner, #ads, #advertisement,
 [aria-label*="advertisement" i],
 [class*="newsletter-modal" i],
-[class*="paywall" i],
+/* Do NOT hide [class*="paywall"] — many publishers wrap the real article body in .paywall */
 [class*="adblock-wall" i],
 [class*="adblock_wall" i],
 [id*="adblock" i][class*="modal" i],
@@ -332,6 +339,115 @@ ins.adsbygoogle,
   pointer-events: none !important;
 }
 `
+
+/**
+ * Un-hide article bodies that publishers keep in the DOM but visually gate.
+ * Inverse of CLEANUP — never use height:0 here.
+ */
+export const CONTENT_REVEAL_CSS = `
+/* Show schema/paywall-wrapped article text that is already in the HTML */
+.paywall,
+[class*="paywall" i],
+[class*="Paywall" i],
+[itemprop="articleBody"],
+[itemprop="articleLead"],
+.articleBody,
+.article-body,
+.article__body,
+#mainBody,
+main article,
+[subscriptions-section="content"],
+[subscriptions-display="granted"],
+.wsj-snippet-body,
+.article-content,
+.crawler {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  color: inherit !important;
+}
+
+/* Strip common soft-gate overlays without removing the article */
+[subscriptions-section="content-not-granted"],
+[subscriptions-display="NOT granted"],
+[amp-access-hide],
+[class*="snippet-promotion" i],
+[class*="dynamic-inset" i][class*="login" i],
+[data-testid*="paywall" i],
+[data-testid*="subscribe-dialog" i],
+[class*="barricade" i],
+.wsj-eop-message,
+#cx-article-lock-overlay,
+#cx-snippet-overlay {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+html, body {
+  overflow: auto !important;
+  height: auto !important;
+  position: static !important;
+}
+`
+
+/** Client-side follow-up for soft gates that re-apply after hydration. */
+export const CONTENT_REVEAL_SCRIPT = `
+(function() {
+  try {
+    var hideGate = function(el) {
+      try {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+      } catch (e) {}
+    };
+    var showBody = function(el) {
+      try {
+        el.style.setProperty('display', 'block', 'important');
+        el.style.setProperty('visibility', 'visible', 'important');
+        el.style.setProperty('opacity', '1', 'important');
+        el.style.setProperty('max-height', 'none', 'important');
+        el.style.setProperty('height', 'auto', 'important');
+        el.style.setProperty('overflow', 'visible', 'important');
+        el.removeAttribute('hidden');
+        el.removeAttribute('amp-access-hide');
+      } catch (e) {}
+    };
+    var run = function() {
+      try {
+        document.querySelectorAll(
+          '[subscriptions-section="content-not-granted"],[subscriptions-display="NOT granted"],[amp-access-hide],[data-testid*="paywall" i],[data-testid*="subscribe-dialog" i],#cx-article-lock-overlay,#cx-snippet-overlay,.wsj-eop-message'
+        ).forEach(hideGate);
+
+        document.querySelectorAll(
+          '.paywall,[class*="paywall" i],[itemprop="articleBody"],[itemprop="articleLead"],.articleBody,.article-body,.article__body,#mainBody,[subscriptions-section="content"],.wsj-snippet-body,.article-content,.crawler'
+        ).forEach(showBody);
+
+        if (document.documentElement) {
+          document.documentElement.style.removeProperty('overflow');
+          document.documentElement.style.setProperty('overflow', 'auto', 'important');
+        }
+        if (document.body) {
+          document.body.style.removeProperty('overflow');
+          document.body.style.setProperty('overflow', 'auto', 'important');
+          document.body.style.removeProperty('position');
+          document.body.classList.remove('overflow-hidden', 'no-scroll', 'modal-open');
+        }
+      } catch (e) {}
+    };
+    run();
+    setInterval(run, 1200);
+    try {
+      new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
+    } catch (e) {}
+  } catch (e) {}
+})();
+`
+
 
 /**
  * Stubs common adblock-detection libraries + bait-element checks.
