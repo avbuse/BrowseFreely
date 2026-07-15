@@ -41,6 +41,27 @@ const ADSHIELD_CUSTOM_RULES = [
   '||pagead2.googlesyndication.com^$domain=windowscentral.com|tomsguide.com|techradar.com|tomshardware.com|androidcentral.com',
 ]
 
+/**
+ * Allow CMP / privacy-preference scripts that Cookie Monster otherwise blocks.
+ * Without these, Sourcepoint (Future plc) and similar consents cannot load or save.
+ */
+const CMP_ALLOW_RULES = [
+  '@@||cdn.privacy-mgmt.com^',
+  '@@||privacy-mgmt.com^',
+  '@@||message.sp-prod.net^',
+  '@@||cms.sp-prod.net^',
+  '@@||ccpa-notice.sp-prod.net^',
+  '@@||sourcepoint.mgr.consensu.org^',
+  '@@||cdn.cookielaw.org^',
+  '@@||cdn.cookielaw.org^$script',
+  '@@||geolocation.onetrust.com^',
+  '@@||consent.cookiebot.com^',
+  '@@||consentcdn.cookiebot.com^',
+  '@@||vendorlist.consensu.org^',
+  '@@||gdpr-wrapper.privacymanager.io^',
+  '@@||wrappermessagingwithoutdetection.js^',
+]
+
 const TRANSPARENT_GIF = Uint8Array.from(
   atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'),
   (c) => c.charCodeAt(0)
@@ -74,12 +95,14 @@ export async function getAdblocker(): Promise<FiltersEngine> {
 
     try {
       engine!.updateFromDiff({
-        added: ADSHIELD_CUSTOM_RULES,
+        added: [...ADSHIELD_CUSTOM_RULES, ...CMP_ALLOW_RULES],
         removed: [],
       })
-      console.log(`[ADBLOCK] Applied ${ADSHIELD_CUSTOM_RULES.length} Ad-Shield/Future custom rules`)
+      console.log(
+        `[ADBLOCK] Applied ${ADSHIELD_CUSTOM_RULES.length} Ad-Shield rules + ${CMP_ALLOW_RULES.length} CMP allow rules`
+      )
     } catch (err) {
-      console.warn('[ADBLOCK] Failed to apply Ad-Shield custom rules:', err)
+      console.warn('[ADBLOCK] Failed to apply custom rules:', err)
     }
 
     return engine!
@@ -289,12 +312,6 @@ ins.adsbygoogle,
 .ad-banner, .adbanner, .adsbox, .ad-container, .ads-container,
 #ad-banner, #ads, #ad, #advertisement,
 [aria-label*="advertisement" i],
-[id*="cookie-consent" i],
-[class*="cookie-banner" i],
-[class*="cookieBanner" i],
-[id*="onetrust" i],
-[class*="fc-consent" i],
-[class*="sp_veil" i],
 [class*="newsletter-modal" i],
 [class*="paywall" i],
 [class*="adblock-wall" i],
@@ -411,7 +428,7 @@ export const ANTI_ADBLOCK_STUB_SCRIPT = `
         '[class*="adblock-wall"]','[class*="adblock_wall"]','[class*="adblock-modal"]',
         '[class*="disable-adblock"]','[class*="please-disable-ad"]','[id*="adblock-detected"]',
         '[class*="adb-wrap"]','[class*="adb_overlay"]','#adblock-notification',
-        '.fc-ab-root','.fc-dialog-container'
+        '.fc-ab-root'
       ];
       try {
         document.querySelectorAll(selectors.join(',')).forEach(function(n) {

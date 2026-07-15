@@ -31,7 +31,7 @@ apiRoute.post('/api/settings', async (c) => {
     bypassAdblockDetection: body.bypassAdblockDetection === 'true',
   }
 
-  setCookie(c, 'bf_settings', encodeURIComponent(JSON.stringify(settings)), {
+  setCookie(c, 'bf_settings', JSON.stringify(settings), {
     path: '/',
     maxAge: 60 * 60 * 24 * 365,
     httpOnly: true,

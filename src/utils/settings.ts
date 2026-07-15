@@ -14,7 +14,17 @@ export function getSettings(c: Context): UserSettings {
   const settingsCookie = getCookie(c, 'bf_settings')
   try {
     if (settingsCookie) {
-      const parsed = JSON.parse(decodeURIComponent(settingsCookie))
+      // Hono getCookie already URL-decodes. Older builds double-encoded with
+      // encodeURIComponent, so accept both raw JSON and one extra decode.
+      let raw = settingsCookie
+      if (raw.startsWith('%') || raw.includes('%7B') || raw.includes('%7b')) {
+        try {
+          raw = decodeURIComponent(raw)
+        } catch {
+          /* keep raw */
+        }
+      }
+      const parsed = JSON.parse(raw)
       return {
         userAgent: parsed.userAgent || DEFAULT_USER_AGENT,
         disableJs: !!parsed.disableJs,
