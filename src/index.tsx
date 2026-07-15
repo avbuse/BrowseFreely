@@ -5,7 +5,9 @@ import { browseRoute } from './routes/browse'
 import { assetRoute } from './routes/asset'
 import { apiRoute } from './routes/api'
 import { reportsRoute } from './routes/reports'
+import { tinyshieldRoute } from './routes/tinyshield'
 import { getAdblocker } from './utils/adblocker'
+import { getTinyShieldScript } from './utils/tinyshield'
 import { rateLimit } from './middleware/rateLimit'
 
 const app = new Hono()
@@ -30,7 +32,11 @@ app.use(
 
 app.use('*', async (c, next) => {
   await next()
-  if (!c.req.path.startsWith('/asset') && !c.req.path.startsWith('/browse')) {
+  if (
+    !c.req.path.startsWith('/asset') &&
+    !c.req.path.startsWith('/browse') &&
+    !c.req.path.startsWith('/bf/')
+  ) {
     c.res.headers.set('X-Frame-Options', 'DENY')
     c.res.headers.set(
       'Content-Security-Policy',
@@ -44,6 +50,7 @@ app.route('/', browseRoute)
 app.route('/', assetRoute)
 app.route('/', apiRoute)
 app.route('/', reportsRoute)
+app.route('/', tinyshieldRoute)
 
 app.get('*', (c) => {
   const referer = c.req.header('referer')
@@ -116,6 +123,9 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000
 console.log(`Starting BrowseFreely server on port ${PORT}...`)
 
 getAdblocker().catch(console.error)
+if (process.env.DISABLE_TINYSHIELD !== 'true') {
+  getTinyShieldScript().catch(console.error)
+}
 
 try {
   Bun.serve({

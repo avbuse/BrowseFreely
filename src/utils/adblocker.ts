@@ -17,6 +17,28 @@ const EXTRA_LISTS = [
   // uBO anti-adblock + annoyances (raw uAssets — complements Ghostery mirrors)
   'https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/annoyances.txt',
   'https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/annoyances-others.txt',
+  'https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/annoyances-cookies.txt',
+]
+
+/** Future plc / Ad-Shield network rules (tinyShield handles the script integrity layer). */
+const ADSHIELD_CUSTOM_RULES = [
+  '||cdn.jsdelivr.net/npm/protected-reward-ad@',
+  '||cdn.jsdelivr.net/gh/Ad-Shield/*',
+  '||ad-shield.io^',
+  '||ad-shield.de^',
+  '||adshield.club^',
+  '||adshield.info^',
+  '||refitted.net^',
+  '||html-load.com^',
+  '||content-loader.com^',
+  '||css-load.com^',
+  '||22pixx.xyz^',
+  '||feload.com^',
+  '||bordeaux.futurecdn.net^',
+  '||freyr.futurecdn.net^',
+  '||vanir.futurecdn.net^',
+  '||vanilla.futurecdn.net^$script,domain=windowscentral.com|tomsguide.com|techradar.com|livescience.com|tomshardware.com|gamesradar.com|laptopmag.com|space.com|androidcentral.com|pcgamer.com',
+  '||pagead2.googlesyndication.com^$domain=windowscentral.com|tomsguide.com|techradar.com|tomshardware.com|androidcentral.com',
 ]
 
 const TRANSPARENT_GIF = Uint8Array.from(
@@ -49,6 +71,17 @@ export async function getAdblocker(): Promise<FiltersEngine> {
         engine = FiltersEngine.empty()
       }
     }
+
+    try {
+      engine!.updateFromDiff({
+        added: ADSHIELD_CUSTOM_RULES,
+        removed: [],
+      })
+      console.log(`[ADBLOCK] Applied ${ADSHIELD_CUSTOM_RULES.length} Ad-Shield/Future custom rules`)
+    } catch (err) {
+      console.warn('[ADBLOCK] Failed to apply Ad-Shield custom rules:', err)
+    }
+
     return engine!
   })()
 
@@ -268,7 +301,10 @@ ins.adsbygoogle,
 [class*="adblock_wall" i],
 [id*="adblock" i][class*="modal" i],
 [class*="disable-adblock" i],
-[class*="please-disable" i] {
+[class*="please-disable" i],
+.swal-modal, .swal-overlay, .swal2-container,
+.ad-blocker-notice, #ad-blocker-notice,
+[class*="allow-ads" i], [class*="allowAds" i] {
   display: none !important;
   visibility: hidden !important;
   height: 0 !important;
