@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { Context } from 'hono'
 import { setCookie } from 'hono/cookie'
-import { clearSession, getSessionId } from '../utils/session'
+import { clearSession, getSessionId, setJarCookie } from '../utils/session'
 import { getSettings } from '../utils/settings'
 import { getClientIp } from '../utils/clientIp'
 import {
@@ -46,6 +46,48 @@ apiRoute.get('/api/clear-session', async (c) => {
   getSessionId(c)
   await clearSession(c)
   return c.redirect('/')
+})
+
+/**
+ * Persist a document.cookie write from a proxied page into the encrypted jar
+ * for the upstream hostname (needed for DataDome / auth cookies).
+ */
+apiRoute.post('/api/jar-cookie', async (c) => {
+  getSessionId(c)
+  let body: Record<string, unknown>
+  try {
+    body = (await c.req.json()) as Record<string, unknown>
+  } catch {
+    return c.json({ ok: false, error: 'invalid json' }, 400)
+  }
+
+  const domain = String(body.domain || '').trim()
+  const name = String(body.name || '').trim()
+  const value = String(body.value ?? '')
+
+  if (!domain || !name || name.length > 128 || domain.length > 253) {
+    return c.json({ ok: false, error: 'bad params' }, 400)
+  }
+  // Only allow cookie names we care about for bot/auth, plus short generic names
+  if (!/^[A-Za-z0-9_._-]+$/.test(name)) {
+    return c.json({ ok: false, error: 'bad name' }, 400)
+  }
+  if (value.length > 8192) {
+    return c.json({ ok: false, error: 'value too long' }, 400)
+  }
+
+  try {
+    const host = new URL(domain.includes('://') ? domain : `https://${domain}`).hostname
+    await setJarCookie(c, host, name, value)
+    // Mirror onto registrable-ish parent (wsj.com) for Domain=.wsj.com semantics
+    const parts = host.split('.')
+    if (parts.length > 2) {
+      await setJarCookie(c, parts.slice(-2).join('.'), name, value)
+    }
+    return c.json({ ok: true })
+  } catch {
+    return c.json({ ok: false, error: 'failed' }, 500)
+  }
 })
 
 /**

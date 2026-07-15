@@ -59,15 +59,115 @@ function touch(rec: SessionRecord) {
   rec.updatedAt = Date.now()
 }
 
+function normalizeHost(host: string): string {
+  return host.replace(/^\./, '').toLowerCase()
+}
+
+/** Host + parent domains (www.wsj.com → wsj.com). */
+export function cookieLookupHosts(hostname: string): string[] {
+  const host = normalizeHost(hostname)
+  const out: string[] = [host]
+  const parts = host.split('.')
+  for (let i = 1; i < parts.length - 1; i++) {
+    out.push(parts.slice(i).join('.'))
+  }
+  // Always try eTLD+1 style last two labels when longer
+  if (parts.length >= 2) {
+    const base = parts.slice(-2).join('.')
+    if (!out.includes(base)) out.push(base)
+  }
+  return out
+}
+
+function parseCookieMap(existingStr: string): Map<string, string> {
+  const existingCookies = new Map<string, string>()
+  existingStr.split(';').forEach((part) => {
+    const parts = part.split('=')
+    if (parts.length >= 2) {
+      existingCookies.set(parts[0].trim(), parts.slice(1).join('=').trim())
+    }
+  })
+  return existingCookies
+}
+
+async function writeCookieMap(
+  rec: SessionRecord,
+  domain: string,
+  map: Map<string, string>
+): Promise<void> {
+  const host = normalizeHost(domain)
+  const newCookieStr = Array.from(map.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ')
+  if (!newCookieStr) {
+    rec.cookies.delete(host)
+  } else {
+    rec.cookies.set(host, await encryptText(newCookieStr))
+  }
+}
+
 export async function getCookiesForRequest(c: Context, domain: string): Promise<string> {
   pruneExpired()
   const { key } = await getStorageKey(c)
   const rec = sessions.get(key)
   if (!rec) return ''
   touch(rec)
-  const blob = rec.cookies.get(domain)
-  if (!blob) return ''
-  return (await decryptText(blob)) || ''
+
+  // Merge cookies from host + parent jar keys (DataDome often Domain=.wsj.com)
+  const merged = new Map<string, string>()
+  for (const host of cookieLookupHosts(domain).reverse()) {
+    const blob = rec.cookies.get(host)
+    if (!blob) continue
+    const str = (await decryptText(blob)) || ''
+    for (const [k, v] of parseCookieMap(str)) {
+      merged.set(k, v)
+    }
+  }
+  return Array.from(merged.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ')
+}
+
+async function upsertCookiesOnHost(
+  c: Context,
+  domain: string,
+  pairs: Array<{ name: string; value: string; deleted?: boolean }>
+): Promise<void> {
+  const { key } = await getStorageKey(c)
+  let rec = sessions.get(key)
+  if (!rec) {
+    rec = { cookies: new Map(), updatedAt: Date.now() }
+    sessions.set(key, rec)
+  }
+  touch(rec)
+
+  const host = normalizeHost(domain)
+  const existingStr = rec.cookies.has(host)
+    ? (await decryptText(rec.cookies.get(host)!)) || ''
+    : ''
+  const map = parseCookieMap(existingStr)
+
+  for (const p of pairs) {
+    if (p.deleted || p.value === '') {
+      map.delete(p.name)
+    } else {
+      map.set(p.name, p.value)
+    }
+  }
+  await writeCookieMap(rec, host, map)
+}
+
+/**
+ * Store a cookie from client-side document.cookie (proxied pages) into the jar
+ * for the upstream site hostname.
+ */
+export async function setJarCookie(
+  c: Context,
+  domain: string,
+  name: string,
+  value: string
+): Promise<void> {
+  await upsertCookiesOnHost(c, domain, [{ name, value, deleted: value === '' }])
 }
 
 export async function saveCookiesFromResponse(
@@ -86,41 +186,43 @@ export async function saveCookiesFromResponse(
   }
   touch(rec)
 
-  const existingStr = rec.cookies.has(domain)
-    ? (await decryptText(rec.cookies.get(domain)!)) || ''
-    : ''
+  // Group by Domain attribute when present (e.g. Domain=.wsj.com from DataDome APIs)
+  const byHost = new Map<string, Array<{ name: string; value: string; deleted: boolean }>>()
 
-  const existingCookies = new Map<string, string>()
-  existingStr.split(';').forEach((part) => {
-    const parts = part.split('=')
-    if (parts.length >= 2) {
-      existingCookies.set(parts[0].trim(), parts.slice(1).join('=').trim())
-    }
-  })
+  const addTo = (host: string, name: string, value: string, deleted: boolean) => {
+    const h = normalizeHost(host)
+    if (!byHost.has(h)) byHost.set(h, [])
+    byHost.get(h)!.push({ name, value, deleted })
+  }
 
   for (const raw of setCookies) {
     const mainPart = raw.split(';')[0]
     const parts = mainPart.split('=')
-    if (parts.length >= 2) {
-      const name = parts[0].trim()
-      const value = parts.slice(1).join('=').trim()
-      // Deletion: Max-Age=0 / empty value
-      if (value === '' || /max-age=0/i.test(raw) || /expires=thu,\s*01[-\s]jan[-\s]1970/i.test(raw)) {
-        existingCookies.delete(name)
-      } else {
-        existingCookies.set(name, value)
-      }
+    if (parts.length < 2) continue
+    const name = parts[0].trim()
+    const value = parts.slice(1).join('=').trim()
+    const deleted =
+      value === '' || /max-age=0/i.test(raw) || /expires=thu,\s*01[-\s]jan[-\s]1970/i.test(raw)
+
+    const domainMatch = raw.match(/;\s*domain=([^;]+)/i)
+    const cookieDomain = domainMatch ? domainMatch[1].trim() : domain
+    addTo(cookieDomain, name, value, deleted)
+    // Also mirror onto response host so exact-host lookups still work
+    if (normalizeHost(cookieDomain) !== normalizeHost(domain)) {
+      addTo(domain, name, value, deleted)
     }
   }
 
-  const newCookieStr = Array.from(existingCookies.entries())
-    .map(([k, v]) => `${k}=${v}`)
-    .join('; ')
-
-  if (!newCookieStr) {
-    rec.cookies.delete(domain)
-  } else {
-    rec.cookies.set(domain, await encryptText(newCookieStr))
+  for (const [host, pairs] of byHost) {
+    const existingStr = rec.cookies.has(host)
+      ? (await decryptText(rec.cookies.get(host)!)) || ''
+      : ''
+    const map = parseCookieMap(existingStr)
+    for (const p of pairs) {
+      if (p.deleted) map.delete(p.name)
+      else map.set(p.name, p.value)
+    }
+    await writeCookieMap(rec, host, map)
   }
 }
 

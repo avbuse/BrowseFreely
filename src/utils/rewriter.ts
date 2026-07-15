@@ -16,6 +16,7 @@ import {
   shouldInjectAdShieldPrep,
   shouldInjectTinyShield,
 } from './tinyshield'
+import { htmlLooksLikeDataDomeChallenge } from './botChallenge'
 
 function escapeForJsString(value: string): string {
   return value
@@ -26,23 +27,155 @@ function escapeForJsString(value: string): string {
     .replace(/<\//g, '<\\/')
 }
 
+export type RewriteOptions = {
+  disableJs?: boolean
+  bypassAdblockDetection?: boolean
+  /** Soften injections so DataDome / captcha challenges can run in-page */
+  botChallenge?: boolean
+}
+
+function buildCookieSyncScript(safeBaseUrl: string): string {
+  return `
+(function() {
+  try {
+    var base = '${safeBaseUrl}';
+    var host = '';
+    try { host = new URL(base).hostname; } catch (e) { return; }
+
+    var sync = function(name, value) {
+      if (!name) return;
+      // Always sync bot/auth cookies; also sync short session-ish names
+      if (!/^(datadome|dd_|__cf|cf_|session|auth|token|jwt|sid|uid)/i.test(name) && name.length > 40) return;
+      try {
+        fetch('/api/jar-cookie', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: host, name: name, value: value == null ? '' : String(value) }),
+          credentials: 'same-origin',
+          keepalive: true
+        }).catch(function(){});
+      } catch (e) {}
+    };
+
+    var desc = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie') ||
+               Object.getOwnPropertyDescriptor(HTMLDocument.prototype, 'cookie');
+    if (!desc || !desc.set) return;
+    var rawSet = desc.set;
+    var rawGet = desc.get;
+    Object.defineProperty(document, 'cookie', {
+      configurable: true,
+      enumerable: true,
+      get: function() { return rawGet.call(document); },
+      set: function(v) {
+        try {
+          var s = String(v || '');
+          var nv = s.split(';')[0];
+          var eq = nv.indexOf('=');
+          if (eq > 0) {
+            var n = nv.slice(0, eq).trim();
+            var val = nv.slice(eq + 1).trim();
+            sync(n, val);
+          }
+        } catch (e) {}
+        return rawSet.call(document, v);
+      }
+    });
+  } catch (e) {}
+})();
+`
+}
+
+function buildFetchAndXhrProxyScript(safeBaseUrl: string): string {
+  return `
+(function() {
+  var base = '${safeBaseUrl}';
+  function isDirectBotHost(abs) {
+    try {
+      var h = new URL(abs).hostname.toLowerCase();
+      return /(^|\\.)(datadome\\.co|captcha-delivery\\.com)$/.test(h);
+    } catch (e) { return false; }
+  }
+  function proxyUrl(u) {
+    try {
+      if (!u || typeof u !== 'string') return u;
+      if (u.indexOf('/browse') === 0 || u.indexOf('/asset') === 0 || u.indexOf('/api/') === 0 || u.indexOf('/bf/') === 0) return u;
+      if (u.charAt(0) === '#' || /^(javascript|mailto|tel|data):/i.test(u)) return u;
+      var abs = new URL(u, base).href;
+      if (abs.indexOf('http') !== 0) return u;
+      // Real browser TLS + user IP for DataDome / captcha CDNs
+      if (isDirectBotHost(abs)) return abs;
+      return '/asset?url=' + encodeURIComponent(abs);
+    } catch (e) { return u; }
+  }
+
+  var originalFetch = window.fetch;
+  window.fetch = function() {
+    var input = arguments[0];
+    if (typeof input === 'string') {
+      arguments[0] = proxyUrl(input);
+    } else if (input && typeof input === 'object' && typeof input.url === 'string') {
+      try {
+        var proxied = proxyUrl(input.url);
+        if (proxied !== input.url) {
+          arguments[0] = new Request(proxied, input);
+        }
+      } catch (e) {}
+    }
+    return originalFetch.apply(this, arguments);
+  };
+
+  // DataDome challenge uses XHR POSTs — proxy those too (except DD hosts)
+  if (window.XMLHttpRequest) {
+    var rawOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      try {
+        if (typeof url === 'string') arguments[1] = proxyUrl(url);
+      } catch (e) {}
+      return rawOpen.apply(this, arguments);
+    };
+  }
+})();
+`
+}
+
 export async function rewriteHtml(
   htmlStream: ReadableStream | Response,
   baseUrl: string,
-  disableJs: boolean,
-  bypassAdblockDetection: boolean = true
+  disableJsOrOpts: boolean | RewriteOptions = false,
+  bypassAdblockDetectionArg: boolean = true
 ): Promise<Response> {
-  const topBarHtml = TopBar({ currentUrl: baseUrl, disableJs }).toString()
-  const safeBaseUrl = escapeForJsString(baseUrl)
+  const opts: RewriteOptions =
+    typeof disableJsOrOpts === 'object' && disableJsOrOpts
+      ? disableJsOrOpts
+      : {
+          disableJs: !!disableJsOrOpts,
+          bypassAdblockDetection: bypassAdblockDetectionArg,
+        }
 
-  const cosmetics = getCosmeticsForUrl(baseUrl)
+  let disableJs = !!opts.disableJs
+  const bypassAdblockDetection = opts.bypassAdblockDetection !== false
+  let botChallenge = !!opts.botChallenge
 
   const source = htmlStream instanceof Response ? htmlStream : new Response(htmlStream)
   let html = await source.text()
-  html = applyHtmlFilters(baseUrl, html)
+
+  if (!botChallenge && htmlLooksLikeDataDomeChallenge(html)) {
+    botChallenge = true
+  }
+  // Challenges cannot run without JS
+  if (botChallenge) disableJs = false
+
+  const topBarHtml = TopBar({ currentUrl: baseUrl, disableJs }).toString()
+  const safeBaseUrl = escapeForJsString(baseUrl)
+
+  const cosmetics = botChallenge ? { styles: '', scripts: [] as string[] } : getCosmeticsForUrl(baseUrl)
+
+  if (!botChallenge) {
+    html = applyHtmlFilters(baseUrl, html)
+  }
 
   // Prefer removing Ad-Shield / Future detection over fighting it in-page.
-  if (bypassAdblockDetection) {
+  if (bypassAdblockDetection && !botChallenge) {
     html = neutralizeAdShieldConfig(html)
   }
 
@@ -89,9 +222,15 @@ export async function rewriteHtml(
   })
 
   const injectAdShieldPrep =
-    !disableJs && bypassAdblockDetection && shouldInjectAdShieldPrep(baseUrl, html)
+    !disableJs &&
+    !botChallenge &&
+    bypassAdblockDetection &&
+    shouldInjectAdShieldPrep(baseUrl, html)
   const injectTinyShield =
-    !disableJs && bypassAdblockDetection && shouldInjectTinyShield(baseUrl, html)
+    !disableJs &&
+    !botChallenge &&
+    bypassAdblockDetection &&
+    shouldInjectTinyShield(baseUrl, html)
 
   rewriter.on('head', {
     element(el) {
@@ -99,7 +238,9 @@ export async function rewriteHtml(
         '<style data-bf-chrome>body { margin-top: 48px !important; } [data-bf-topbar]{ z-index:2147483647 !important; }</style>',
         { html: true }
       )
-      el.append(`<style data-bf-cleanup>${CLEANUP_CSS}</style>`, { html: true })
+      if (!botChallenge) {
+        el.append(`<style data-bf-cleanup>${CLEANUP_CSS}</style>`, { html: true })
+      }
 
       if (cosmetics.styles) {
         el.append(`<style data-bf-cosmetics id="bf-cosmetics-live">${cosmetics.styles}</style>`, {
@@ -112,10 +253,16 @@ export async function rewriteHtml(
       if (!disableJs) {
         const scriptParts: string[] = [
           buildNavigationGuardScript(safeBaseUrl),
-          FINGERPRINT_SPOOF_SCRIPT,
+          buildCookieSyncScript(safeBaseUrl),
+          buildFetchAndXhrProxyScript(safeBaseUrl),
         ]
 
-        if (bypassAdblockDetection) {
+        // Canvas spoofing breaks DataDome WASM / sensor — skip on challenges
+        if (!botChallenge) {
+          scriptParts.push(FINGERPRINT_SPOOF_SCRIPT)
+        }
+
+        if (bypassAdblockDetection && !botChallenge) {
           if (injectAdShieldPrep || injectTinyShield) {
             scriptParts.push(FUTURE_ADSHIELD_PREP_SCRIPT)
           }
@@ -128,30 +275,6 @@ export async function rewriteHtml(
         if (cosmetics.styles) {
           scriptParts.push(buildCosmeticObserverScript(cosmetics.styles))
         }
-
-        scriptParts.push(`
-          (function() {
-            const originalFetch = window.fetch;
-            const base = '${safeBaseUrl}';
-            window.fetch = function() {
-              var input = arguments[0];
-              if (typeof input === 'string' && input.startsWith('/') &&
-                  input.indexOf('/browse') !== 0 && input.indexOf('/asset') !== 0 &&
-                  input.indexOf('/api/') !== 0 && input.indexOf('/bf/') !== 0) {
-                arguments[0] = '/asset?url=' + encodeURIComponent(new URL(input, base).href);
-              } else if (input && typeof input === 'object' && typeof input.url === 'string') {
-                try {
-                  var u = input.url;
-                  if (u.startsWith('/') && u.indexOf('/browse') !== 0 && u.indexOf('/asset') !== 0 &&
-                      u.indexOf('/bf/') !== 0) {
-                    arguments[0] = new Request('/asset?url=' + encodeURIComponent(new URL(u, base).href), input);
-                  }
-                } catch (e) {}
-              }
-              return originalFetch.apply(this, arguments);
-            };
-          })();
-        `)
 
         // tinyShield only as fallback when config flip failed (or FORCE_TINYSHIELD)
         if (injectTinyShield) {
@@ -224,10 +347,19 @@ export async function rewriteHtml(
     },
   })
 
+  function isBotChallengeHost(url: string): boolean {
+    try {
+      const h = new URL(url).hostname.toLowerCase()
+      return /(^|\.)(datadome\.co|captcha-delivery\.com)$/.test(h)
+    } catch {
+      return false
+    }
+  }
+
   rewriter.on('img, iframe, source, track, link', {
     element(el) {
       const tag = el.tagName.toLowerCase()
-      if (tag === 'link' && bypassAdblockDetection) {
+      if (tag === 'link' && bypassAdblockDetection && !botChallenge) {
         const rel = (el.getAttribute('rel') || '').toLowerCase()
         if (
           (rel.includes('modulepreload') || rel.includes('preload') || rel.includes('prefetch')) &&
@@ -242,6 +374,11 @@ export async function rewriteHtml(
       const src = el.getAttribute(srcAttr)
       if (src) {
         const absolute = resolveUrl(baseUrl, src)
+        // Load DataDome/captcha iframes & assets directly in the real browser
+        if (absolute.startsWith('http') && isBotChallengeHost(absolute)) {
+          el.setAttribute(srcAttr, absolute)
+          return
+        }
         if (absolute.startsWith('http') && !absolute.includes('/asset?url=')) {
           el.setAttribute(srcAttr, `/asset?url=${encodeURIComponent(absolute)}`)
         } else {
@@ -268,7 +405,7 @@ export async function rewriteHtml(
         }
         const src = el.getAttribute('src')
         // Strip Ad-Shield / Future ad loaders so detection never runs
-        if (bypassAdblockDetection && isAdShieldLoaderUrl(src)) {
+        if (!botChallenge && bypassAdblockDetection && isAdShieldLoaderUrl(src)) {
           el.remove()
           return
         }
@@ -276,6 +413,10 @@ export async function rewriteHtml(
           // Never proxy our first-party /bf/* helpers through /asset
           if (src.startsWith('/bf/')) return
           const absolute = resolveUrl(baseUrl, src)
+          if (absolute.startsWith('http') && isBotChallengeHost(absolute)) {
+            el.setAttribute('src', absolute)
+            return
+          }
           if (absolute.startsWith('http') && !absolute.includes('/asset?url=')) {
             el.setAttribute('src', `/asset?url=${encodeURIComponent(absolute)}`)
           } else {

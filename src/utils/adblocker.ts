@@ -5,6 +5,7 @@ import {
   StreamingHtmlFilter,
 } from '@ghostery/adblocker'
 import type { RequestType, HTMLSelector } from '@ghostery/adblocker'
+import { DATADOME_ALLOW_RULES } from './botChallenge'
 
 let engine: FiltersEngine | null = null
 let loading: Promise<FiltersEngine> | null = null
@@ -95,11 +96,11 @@ export async function getAdblocker(): Promise<FiltersEngine> {
 
     try {
       engine!.updateFromDiff({
-        added: [...ADSHIELD_CUSTOM_RULES, ...CMP_ALLOW_RULES],
+        added: [...ADSHIELD_CUSTOM_RULES, ...CMP_ALLOW_RULES, ...DATADOME_ALLOW_RULES],
         removed: [],
       })
       console.log(
-        `[ADBLOCK] Applied ${ADSHIELD_CUSTOM_RULES.length} Ad-Shield rules + ${CMP_ALLOW_RULES.length} CMP allow rules`
+        `[ADBLOCK] Applied ${ADSHIELD_CUSTOM_RULES.length} Ad-Shield + ${CMP_ALLOW_RULES.length} CMP + ${DATADOME_ALLOW_RULES.length} DataDome allow rules`
       )
     } catch (err) {
       console.warn('[ADBLOCK] Failed to apply custom rules:', err)
