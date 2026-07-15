@@ -1,6 +1,6 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { isValidUrl, isPrivateIP, ensureUrl, safeFetch, tlsOptions } from '../utils/url'
-import { rewriteHtml } from '../utils/rewriter'
+import { mergeBrowseQueryIntoTarget, rewriteHtml } from '../utils/rewriter'
 import { ensureAdblockerReady, matchAdRequest } from '../utils/adblocker'
 import { getSettings } from '../utils/settings'
 import { getCookiesForRequest, saveCookiesFromResponse } from '../utils/session'
@@ -8,45 +8,38 @@ import { mergeContextResponse } from '../utils/response'
 
 export const browseRoute = new Hono()
 
-browseRoute.get('/browse', async (c) => {
+function errorPage(title: string, status: number) {
+  return (
+    <div style={{ color: 'white', background: '#0a0a0f', padding: '20px', height: '100vh' }}>
+      <h2>{title}</h2>
+      <a href="/" style={{ color: '#3b82f6' }}>
+        Try Again
+      </a>
+    </div>
+  )
+}
+
+async function handleBrowse(c: Context, method: 'GET' | 'POST') {
   const urlParam = c.req.query('url')
 
   if (!urlParam) {
-    return c.html(
-      <div style={{ color: 'white', background: '#0a0a0f', padding: '20px', height: '100vh' }}>
-        <h2>Error: URL is required</h2>
-        <a href="/" style={{ color: '#3b82f6' }}>
-          Try Again
-        </a>
-      </div>,
-      400
-    )
+    return c.html(errorPage('Error: URL is required', 400), 400)
   }
 
-  const targetUrl = ensureUrl(urlParam)
+  let targetUrl = ensureUrl(urlParam)
+
+  // Google-style GET forms submit as /browse?url=https://google.com/search&q=cats
+  // Merge sibling params into the upstream URL.
+  if (method === 'GET') {
+    targetUrl = mergeBrowseQueryIntoTarget(c.req.url, targetUrl)
+  }
 
   if (!isValidUrl(targetUrl)) {
-    return c.html(
-      <div style={{ color: 'white', background: '#0a0a0f', padding: '20px', height: '100vh' }}>
-        <h2>Error: Invalid URL</h2>
-        <a href="/" style={{ color: '#3b82f6' }}>
-          Try Again
-        </a>
-      </div>,
-      400
-    )
+    return c.html(errorPage('Error: Invalid URL', 400), 400)
   }
 
   if (isPrivateIP(targetUrl)) {
-    return c.html(
-      <div style={{ color: 'white', background: '#0a0a0f', padding: '20px', height: '100vh' }}>
-        <h2>Error: Forbidden URL</h2>
-        <a href="/" style={{ color: '#3b82f6' }}>
-          Try Again
-        </a>
-      </div>,
-      403
-    )
+    return c.html(errorPage('Error: Forbidden URL', 403), 403)
   }
 
   await ensureAdblockerReady()
@@ -72,7 +65,7 @@ browseRoute.get('/browse', async (c) => {
       'Accept-Language': 'en-US,en;q=0.9',
       'Sec-Fetch-Dest': 'document',
       'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-Site': method === 'POST' ? 'same-origin' : 'none',
       'Sec-Fetch-User': '?1',
       'Upgrade-Insecure-Requests': '1',
       'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
@@ -84,11 +77,19 @@ browseRoute.get('/browse', async (c) => {
       fetchHeaders['Cookie'] = proxyCookies
     }
 
+    let body: ArrayBuffer | undefined
+    if (method === 'POST') {
+      const contentType = c.req.header('content-type') || 'application/x-www-form-urlencoded'
+      fetchHeaders['Content-Type'] = contentType
+      body = await c.req.arrayBuffer()
+    }
+
     const { response, finalUrl } = await safeFetch(
       targetUrl,
       {
-        method: 'GET',
+        method,
         headers: fetchHeaders,
+        body,
         tls: tlsOptions(),
       },
       async (hopUrl, hopResponse) => {
@@ -108,7 +109,6 @@ browseRoute.get('/browse', async (c) => {
     cleanHeaders.delete('x-frame-options')
     cleanHeaders.delete('set-cookie')
 
-    // Do not blanket-CORS HTML documents
     if (!isHtml) {
       cleanHeaders.set('Access-Control-Allow-Origin', '*')
     }
@@ -173,4 +173,7 @@ browseRoute.get('/browse', async (c) => {
       e?.message === 'Forbidden URL (SSRF protection)' ? 403 : 500
     )
   }
-})
+}
+
+browseRoute.get('/browse', (c) => handleBrowse(c, 'GET'))
+browseRoute.post('/browse', (c) => handleBrowse(c, 'POST'))
