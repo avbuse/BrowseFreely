@@ -342,7 +342,8 @@ ins.adsbygoogle,
 
 /**
  * Un-hide article bodies that publishers keep in the DOM but visually gate.
- * Inverse of CLEANUP — never use height:0 here.
+ * WSJ/NYT soft walls often use mask-image gradients (text "fades out") rather
+ * than display:none — those must be cleared explicitly.
  */
 export const CONTENT_REVEAL_CSS = `
 /* Show schema/paywall-wrapped article text that is already in the HTML */
@@ -359,8 +360,11 @@ main article,
 [subscriptions-section="content"],
 [subscriptions-display="granted"],
 .wsj-snippet-body,
+[class*="snippet-body" i],
+[class*="SnippetBody" i],
 .article-content,
-.crawler {
+.crawler,
+main p, article p, main section, article section {
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
@@ -370,6 +374,41 @@ main article,
   filter: none !important;
   -webkit-filter: none !important;
   color: inherit !important;
+  -webkit-text-fill-color: unset !important;
+  background-clip: unset !important;
+  -webkit-background-clip: unset !important;
+  /* Soft-paywall fade: kill gradient masks on the text itself */
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  -webkit-mask-size: auto !important;
+  mask-size: auto !important;
+}
+
+/* Descendants too — WSJ often masks an inner wrapper, not the outer .paywall */
+.paywall *,
+[class*="paywall" i] *,
+[itemprop="articleBody"] *,
+.articleBody *,
+.article-body *,
+.article__body *,
+#mainBody *,
+main article *,
+.wsj-snippet-body *,
+[class*="snippet-body" i] *,
+.article-content *,
+.crawler * {
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  opacity: 1 !important;
+  filter: none !important;
+  max-height: none !important;
+  overflow: visible !important;
+  -webkit-text-fill-color: unset !important;
+  color: inherit !important;
 }
 
 /* Strip common soft-gate overlays without removing the article */
@@ -377,15 +416,42 @@ main article,
 [subscriptions-display="NOT granted"],
 [amp-access-hide],
 [class*="snippet-promotion" i],
+[class*="snippet-overlay" i],
+[class*="SnippetOverlay" i],
 [class*="dynamic-inset" i][class*="login" i],
 [data-testid*="paywall" i],
 [data-testid*="subscribe-dialog" i],
 [class*="barricade" i],
 .wsj-eop-message,
 #cx-article-lock-overlay,
-#cx-snippet-overlay {
+#cx-snippet-overlay,
+[class*="fade-overlay" i],
+[class*="FadeOverlay" i],
+[class*="gradient-overlay" i],
+[class*="paywall-overlay" i],
+[class*="PaywallOverlay" i] {
   display: none !important;
   pointer-events: none !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  max-height: 0 !important;
+}
+
+/* Pseudo-element gradient fades sitting on top of the snippet */
+.paywall::before, .paywall::after,
+[class*="paywall" i]::before, [class*="paywall" i]::after,
+[class*="snippet" i]::before, [class*="snippet" i]::after,
+[class*="Snippet" i]::before, [class*="Snippet" i]::after,
+article::before, article::after,
+[itemprop="articleBody"]::before, [itemprop="articleBody"]::after,
+.wsj-snippet-body::before, .wsj-snippet-body::after,
+[class*="snippet-body" i]::before, [class*="snippet-body" i]::after {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+  opacity: 0 !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
 }
 
 html, body {
@@ -403,9 +469,10 @@ export const CONTENT_REVEAL_SCRIPT = `
       try {
         el.style.setProperty('display', 'none', 'important');
         el.style.setProperty('pointer-events', 'none', 'important');
+        el.style.setProperty('opacity', '0', 'important');
       } catch (e) {}
     };
-    var showBody = function(el) {
+    var clearFade = function(el) {
       try {
         el.style.setProperty('display', 'block', 'important');
         el.style.setProperty('visibility', 'visible', 'important');
@@ -413,26 +480,69 @@ export const CONTENT_REVEAL_SCRIPT = `
         el.style.setProperty('max-height', 'none', 'important');
         el.style.setProperty('height', 'auto', 'important');
         el.style.setProperty('overflow', 'visible', 'important');
+        el.style.setProperty('filter', 'none', 'important');
+        el.style.setProperty('-webkit-mask-image', 'none', 'important');
+        el.style.setProperty('mask-image', 'none', 'important');
+        el.style.setProperty('-webkit-mask', 'none', 'important');
+        el.style.setProperty('mask', 'none', 'important');
+        el.style.setProperty('-webkit-text-fill-color', 'unset', 'important');
+        el.style.setProperty('background-clip', 'unset', 'important');
+        el.style.setProperty('-webkit-background-clip', 'unset', 'important');
         el.removeAttribute('hidden');
         el.removeAttribute('amp-access-hide');
       } catch (e) {}
     };
+    var looksLikeFadeOverlay = function(el) {
+      try {
+        if (!el || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return false;
+        var st = window.getComputedStyle(el);
+        if (!st) return false;
+        var pos = st.position;
+        if (pos !== 'absolute' && pos !== 'fixed') return false;
+        var bg = (st.backgroundImage || '') + (st.background || '');
+        var mask = (st.maskImage || '') + (st.webkitMaskImage || '');
+        var hasGrad = /linear-gradient|radial-gradient/i.test(bg) || /linear-gradient/i.test(mask);
+        if (!hasGrad) return false;
+        // Overlay covering the lower part of an article/snippet
+        var r = el.getBoundingClientRect();
+        if (r.height < 40 || r.width < 80) return false;
+        var txt = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+        // Empty / near-empty gradient layers are fade masks
+        return txt.length < 40;
+      } catch (e) { return false; }
+    };
     var run = function() {
       try {
         document.querySelectorAll(
-          '[subscriptions-section="content-not-granted"],[subscriptions-display="NOT granted"],[amp-access-hide],[data-testid*="paywall" i],[data-testid*="subscribe-dialog" i],#cx-article-lock-overlay,#cx-snippet-overlay,.wsj-eop-message'
+          '[subscriptions-section="content-not-granted"],[subscriptions-display="NOT granted"],[amp-access-hide],[data-testid*="paywall" i],[data-testid*="subscribe-dialog" i],#cx-article-lock-overlay,#cx-snippet-overlay,.wsj-eop-message,[class*="snippet-overlay" i],[class*="fade-overlay" i],[class*="gradient-overlay" i],[class*="paywall-overlay" i]'
         ).forEach(hideGate);
 
-        document.querySelectorAll(
-          '.paywall,[class*="paywall" i],[itemprop="articleBody"],[itemprop="articleLead"],.articleBody,.article-body,.article__body,#mainBody,[subscriptions-section="content"],.wsj-snippet-body,.article-content,.crawler'
-        ).forEach(showBody);
+        var roots = document.querySelectorAll(
+          '.paywall,[class*="paywall" i],[itemprop="articleBody"],[itemprop="articleLead"],.articleBody,.article-body,.article__body,#mainBody,main article,[subscriptions-section="content"],.wsj-snippet-body,[class*="snippet-body" i],.article-content,.crawler,main'
+        );
+        roots.forEach(function(root) {
+          clearFade(root);
+          try {
+            root.querySelectorAll('*').forEach(function(child) {
+              var st = child.getAttribute('style') || '';
+              if (/mask|opacity|max-height|overflow|linear-gradient|background-clip|text-fill/i.test(st) ||
+                  /paywall|snippet|article|crawler|body/i.test(child.className || '')) {
+                clearFade(child);
+              }
+              if (looksLikeFadeOverlay(child)) hideGate(child);
+            });
+          } catch (e) {}
+        });
+
+        // Also strip inline mask styles anywhere under main
+        try {
+          document.querySelectorAll('main [style*="mask"], article [style*="mask"], main [style*="Mask"], article [style*="gradient"]').forEach(clearFade);
+        } catch (e) {}
 
         if (document.documentElement) {
-          document.documentElement.style.removeProperty('overflow');
           document.documentElement.style.setProperty('overflow', 'auto', 'important');
         }
         if (document.body) {
-          document.body.style.removeProperty('overflow');
           document.body.style.setProperty('overflow', 'auto', 'important');
           document.body.style.removeProperty('position');
           document.body.classList.remove('overflow-hidden', 'no-scroll', 'modal-open');
@@ -440,9 +550,9 @@ export const CONTENT_REVEAL_SCRIPT = `
       } catch (e) {}
     };
     run();
-    setInterval(run, 1200);
+    setInterval(run, 800);
     try {
-      new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
+      new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
     } catch (e) {}
   } catch (e) {}
 })();
