@@ -2,6 +2,12 @@ import { Hono, type Context } from 'hono'
 import { isValidUrl, isPrivateIP, ensureUrl, safeFetch, tlsOptions } from '../utils/url'
 import { mergeBrowseQueryIntoTarget, rewriteHtml } from '../utils/rewriter'
 import { isDataDomeChallengePage } from '../utils/botChallenge'
+import {
+  fetchArchiveSnapshot,
+  hostnameIsDowJonesNews,
+  looksLikeArticlePath,
+  looksLikeSoftPaywallHtml,
+} from '../utils/archiveFallback'
 import { ensureAdblockerReady, matchAdRequest } from '../utils/adblocker'
 import { getSettings } from '../utils/settings'
 import { getCookiesForRequest, saveCookiesFromResponse } from '../utils/session'
@@ -126,20 +132,38 @@ async function handleBrowse(c: Context, method: 'GET' | 'POST') {
       )
     }
 
-    const htmlText = new TextDecoder().decode(buffer)
-    const botChallenge = isDataDomeChallengePage(response, htmlText)
+    let htmlText = new TextDecoder().decode(buffer)
+    let botChallenge = isDataDomeChallengePage(response, htmlText)
+    let rewriteSourceUrl = finalUrl
+
+    // WSJ/Barrons soft teaser: try archive snapshot for fuller HTML (same approach as calibre)
+    if (
+      !botChallenge &&
+      hostnameIsDowJonesNews(finalUrl) &&
+      (looksLikeSoftPaywallHtml(htmlText) || looksLikeArticlePath(finalUrl))
+    ) {
+      const archived = await fetchArchiveSnapshot(finalUrl)
+      if (archived && archived.length > Math.max(htmlText.length * 1.1, 20000)) {
+        htmlText = archived
+        rewriteSourceUrl = finalUrl
+        botChallenge = false
+        console.log(
+          `[browse] Soft paywall on ${finalUrl} — using archive snapshot (${archived.length} bytes)`
+        )
+      }
+    }
 
     cleanHeaders.set('content-type', 'text/html; charset=utf-8')
 
-    const cleanResponse = new Response(buffer, {
-      status: response.status,
+    const cleanResponse = new Response(htmlText, {
+      status: botChallenge ? response.status : 200,
       statusText: response.statusText,
       headers: cleanHeaders,
     })
 
     return mergeContextResponse(
       c,
-      await rewriteHtml(cleanResponse, finalUrl, {
+      await rewriteHtml(cleanResponse, rewriteSourceUrl, {
         disableJs: settings.disableJs,
         bypassAdblockDetection: settings.bypassAdblockDetection,
         botChallenge,

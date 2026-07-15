@@ -245,14 +245,16 @@ export async function rewriteHtml(
       if (!botChallenge) {
         el.append(`<style data-bf-cleanup>${CLEANUP_CSS}</style>`, { html: true })
       }
-      el.append(`<style data-bf-reveal>${CONTENT_REVEAL_CSS}</style>`, { html: true })
-
 
       if (cosmetics.styles) {
         el.append(`<style data-bf-cosmetics id="bf-cosmetics-live">${cosmetics.styles}</style>`, {
           html: true,
         })
       }
+
+      // Reveal LAST among our head styles so it wins over cosmetics
+      el.append(`<style data-bf-reveal>${CONTENT_REVEAL_CSS}</style>`, { html: true })
+
 
       // Navigation guard first (even when NoScript is off). With NoScript we still
       // need server-side form merge + catch-all; guard requires JS.

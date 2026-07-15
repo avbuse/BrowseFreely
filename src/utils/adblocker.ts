@@ -343,9 +343,17 @@ ins.adsbygoogle,
 /**
  * Un-hide article bodies that publishers keep in the DOM but visually gate.
  * WSJ/NYT soft walls often use mask-image gradients (text "fades out") rather
- * than display:none — those must be cleared explicitly.
+ * than display:none — those must be cleared explicitly, and re-asserted last.
  */
 export const CONTENT_REVEAL_CSS = `
+/* Nuclear: kill every mask/fade on the page */
+html body * {
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+}
+
 /* Show schema/paywall-wrapped article text that is already in the HTML */
 .paywall,
 [class*="paywall" i],
@@ -375,18 +383,14 @@ main p, article p, main section, article section {
   -webkit-filter: none !important;
   color: inherit !important;
   -webkit-text-fill-color: unset !important;
-  background-clip: unset !important;
-  -webkit-background-clip: unset !important;
-  /* Soft-paywall fade: kill gradient masks on the text itself */
+  background-clip: border-box !important;
+  -webkit-background-clip: border-box !important;
   -webkit-mask-image: none !important;
   mask-image: none !important;
   -webkit-mask: none !important;
   mask: none !important;
-  -webkit-mask-size: auto !important;
-  mask-size: auto !important;
 }
 
-/* Descendants too — WSJ often masks an inner wrapper, not the outer .paywall */
 .paywall *,
 [class*="paywall" i] *,
 [itemprop="articleBody"] *,
@@ -398,7 +402,8 @@ main article *,
 .wsj-snippet-body *,
 [class*="snippet-body" i] *,
 .article-content *,
-.crawler * {
+.crawler *,
+main p *, article p * {
   -webkit-mask-image: none !important;
   mask-image: none !important;
   -webkit-mask: none !important;
@@ -409,6 +414,8 @@ main article *,
   overflow: visible !important;
   -webkit-text-fill-color: unset !important;
   color: inherit !important;
+  background-clip: border-box !important;
+  -webkit-background-clip: border-box !important;
 }
 
 /* Strip common soft-gate overlays without removing the article */
@@ -437,7 +444,6 @@ main article *,
   max-height: 0 !important;
 }
 
-/* Pseudo-element gradient fades sitting on top of the snippet */
 .paywall::before, .paywall::after,
 [class*="paywall" i]::before, [class*="paywall" i]::after,
 [class*="snippet" i]::before, [class*="snippet" i]::after,
@@ -445,7 +451,8 @@ main article *,
 article::before, article::after,
 [itemprop="articleBody"]::before, [itemprop="articleBody"]::after,
 .wsj-snippet-body::before, .wsj-snippet-body::after,
-[class*="snippet-body" i]::before, [class*="snippet-body" i]::after {
+[class*="snippet-body" i]::before, [class*="snippet-body" i]::after,
+main::before, main::after {
   display: none !important;
   content: none !important;
   background: none !important;
@@ -459,12 +466,76 @@ html, body {
   height: auto !important;
   position: static !important;
 }
+
+/* Clean reader panel — solid text, no site CSS can fade it */
+#bf-reader-panel {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: relative !important;
+  z-index: 2147483000 !important;
+  margin: 56px 12px 24px !important;
+  padding: 20px 22px !important;
+  max-width: 760px !important;
+  background: #f7f4ef !important;
+  color: #111 !important;
+  border: 1px solid #d5d0c8 !important;
+  border-radius: 8px !important;
+  font: 18px/1.6 Georgia, "Times New Roman", serif !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  filter: none !important;
+}
+#bf-reader-panel * {
+  color: #111 !important;
+  opacity: 1 !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  background: transparent !important;
+  filter: none !important;
+  -webkit-text-fill-color: #111 !important;
+}
+#bf-reader-panel h1 {
+  font-size: 28px !important;
+  line-height: 1.25 !important;
+  margin: 0 0 12px !important;
+  font-family: Georgia, serif !important;
+}
+#bf-reader-panel p {
+  margin: 0 0 1em !important;
+  display: block !important;
+}
+#bf-reader-panel .bf-reader-label {
+  font: 12px/1.4 system-ui, sans-serif !important;
+  color: #666 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  margin: 0 0 14px !important;
+}
 `
 
 /** Client-side follow-up for soft gates that re-apply after hydration. */
 export const CONTENT_REVEAL_SCRIPT = `
 (function() {
   try {
+    var STYLE_ID = 'bf-reveal-live';
+    var cssText = ${JSON.stringify(
+      // re-use same nuclear rules by reading from a marker — inject minimal live sheet
+      `html body *{-webkit-mask-image:none!important;mask-image:none!important;-webkit-mask:none!important;mask:none!important;}html,body{overflow:auto!important;}`
+    )};
+
+    var ensureStyle = function() {
+      var el = document.getElementById(STYLE_ID);
+      if (!el) {
+        el = document.createElement('style');
+        el.id = STYLE_ID;
+        el.setAttribute('data-bf-reveal-live', '1');
+      }
+      if (el.textContent !== cssText) el.textContent = cssText;
+      // Always move to end so we win the cascade against late site CSS
+      (document.body || document.documentElement).appendChild(el);
+    };
+
     var hideGate = function(el) {
       try {
         el.style.setProperty('display', 'none', 'important');
@@ -472,91 +543,159 @@ export const CONTENT_REVEAL_SCRIPT = `
         el.style.setProperty('opacity', '0', 'important');
       } catch (e) {}
     };
+
     var clearFade = function(el) {
       try {
-        el.style.setProperty('display', 'block', 'important');
-        el.style.setProperty('visibility', 'visible', 'important');
-        el.style.setProperty('opacity', '1', 'important');
-        el.style.setProperty('max-height', 'none', 'important');
-        el.style.setProperty('height', 'auto', 'important');
-        el.style.setProperty('overflow', 'visible', 'important');
-        el.style.setProperty('filter', 'none', 'important');
-        el.style.setProperty('-webkit-mask-image', 'none', 'important');
-        el.style.setProperty('mask-image', 'none', 'important');
-        el.style.setProperty('-webkit-mask', 'none', 'important');
-        el.style.setProperty('mask', 'none', 'important');
-        el.style.setProperty('-webkit-text-fill-color', 'unset', 'important');
-        el.style.setProperty('background-clip', 'unset', 'important');
-        el.style.setProperty('-webkit-background-clip', 'unset', 'important');
+        var props = {
+          'opacity': '1',
+          'visibility': 'visible',
+          'max-height': 'none',
+          'height': 'auto',
+          'overflow': 'visible',
+          'filter': 'none',
+          '-webkit-filter': 'none',
+          '-webkit-mask-image': 'none',
+          'mask-image': 'none',
+          '-webkit-mask': 'none',
+          'mask': 'none',
+          '-webkit-text-fill-color': 'unset',
+          'background-clip': 'border-box',
+          '-webkit-background-clip': 'border-box'
+        };
+        for (var k in props) el.style.setProperty(k, props[k], 'important');
         el.removeAttribute('hidden');
         el.removeAttribute('amp-access-hide');
       } catch (e) {}
     };
+
     var looksLikeFadeOverlay = function(el) {
       try {
-        if (!el || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return false;
+        if (!el || !el.tagName) return false;
+        var tag = el.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK' || tag === 'IMG' || tag === 'SVG' || tag === 'PATH') return false;
         var st = window.getComputedStyle(el);
         if (!st) return false;
         var pos = st.position;
-        if (pos !== 'absolute' && pos !== 'fixed') return false;
-        var bg = (st.backgroundImage || '') + (st.background || '');
-        var mask = (st.maskImage || '') + (st.webkitMaskImage || '');
-        var hasGrad = /linear-gradient|radial-gradient/i.test(bg) || /linear-gradient/i.test(mask);
-        if (!hasGrad) return false;
-        // Overlay covering the lower part of an article/snippet
+        if (pos !== 'absolute' && pos !== 'fixed' && pos !== 'sticky') return false;
+        var bg = (st.backgroundImage || '') + ' ' + (st.background || '');
+        var mask = (st.maskImage || st.webkitMaskImage || '') + '';
+        var hasGrad = /gradient/i.test(bg) || /gradient/i.test(mask);
+        if (!hasGrad && parseFloat(st.opacity) > 0.95) return false;
         var r = el.getBoundingClientRect();
-        if (r.height < 40 || r.width < 80) return false;
-        var txt = (el.textContent || '').replace(/\\s+/g, ' ').trim();
-        // Empty / near-empty gradient layers are fade masks
-        return txt.length < 40;
+        if (r.height < 30 || r.width < 60) return false;
+        // Covering overlays often sit over article mid/bottom
+        var txt = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (txt.length > 180) return false;
+        return hasGrad || /subscribe|sign in|continue reading|already a subscriber/i.test(txt);
       } catch (e) { return false; }
     };
+
+    var buildReader = function() {
+      try {
+        if (document.getElementById('bf-reader-panel')) return;
+        var root =
+          document.querySelector('[itemprop="articleBody"]') ||
+          document.querySelector('article') ||
+          document.querySelector('main') ||
+          document.querySelector('[class*="paywall" i]') ||
+          document.querySelector('[class*="snippet-body" i]');
+        if (!root) return;
+
+        var titleEl = document.querySelector('h1');
+        var title = titleEl ? (titleEl.innerText || '').trim() : '';
+        var parts = [];
+        root.querySelectorAll('p, h2, h3, li, [data-type="paragraph"]').forEach(function(n) {
+          var t = (n.innerText || '').replace(/\\s+/g, ' ').trim();
+          if (t && t.length > 40) parts.push(t);
+        });
+        if (!parts.length) {
+          var blob = (root.innerText || '').replace(/\\s+/g, ' ').trim();
+          if (blob.length > 120) parts.push(blob);
+        }
+        if (!parts.length) return;
+
+        var panel = document.createElement('div');
+        panel.id = 'bf-reader-panel';
+        panel.setAttribute('data-bf-reader', '1');
+        var label = document.createElement('div');
+        label.className = 'bf-reader-label';
+        label.textContent = 'BrowseFreely reader — extracted article text';
+        panel.appendChild(label);
+        if (title) {
+          var h = document.createElement('h1');
+          h.textContent = title;
+          panel.appendChild(h);
+        }
+        parts.forEach(function(t) {
+          var p = document.createElement('p');
+          p.textContent = t;
+          panel.appendChild(p);
+        });
+        var anchor = document.body || document.documentElement;
+        if (anchor.firstChild) anchor.insertBefore(panel, anchor.firstChild);
+        else anchor.appendChild(panel);
+      } catch (e) {}
+    };
+
     var run = function() {
       try {
+        ensureStyle();
+
         document.querySelectorAll(
           '[subscriptions-section="content-not-granted"],[subscriptions-display="NOT granted"],[amp-access-hide],[data-testid*="paywall" i],[data-testid*="subscribe-dialog" i],#cx-article-lock-overlay,#cx-snippet-overlay,.wsj-eop-message,[class*="snippet-overlay" i],[class*="fade-overlay" i],[class*="gradient-overlay" i],[class*="paywall-overlay" i]'
         ).forEach(hideGate);
 
         var roots = document.querySelectorAll(
-          '.paywall,[class*="paywall" i],[itemprop="articleBody"],[itemprop="articleLead"],.articleBody,.article-body,.article__body,#mainBody,main article,[subscriptions-section="content"],.wsj-snippet-body,[class*="snippet-body" i],.article-content,.crawler,main'
+          '.paywall,[class*="paywall" i],[itemprop="articleBody"],[itemprop="articleLead"],.articleBody,.article-body,.article__body,#mainBody,main article,[subscriptions-section="content"],.wsj-snippet-body,[class*="snippet-body" i],.article-content,.crawler,main,article'
         );
         roots.forEach(function(root) {
           clearFade(root);
           try {
-            root.querySelectorAll('*').forEach(function(child) {
-              var st = child.getAttribute('style') || '';
-              if (/mask|opacity|max-height|overflow|linear-gradient|background-clip|text-fill/i.test(st) ||
-                  /paywall|snippet|article|crawler|body/i.test(child.className || '')) {
+            var nodes = root.querySelectorAll('*');
+            for (var i = 0; i < nodes.length; i++) {
+              var child = nodes[i];
+              var stAttr = child.getAttribute('style') || '';
+              var cls = child.className && String(child.className) || '';
+              if (/mask|opacity|max-height|overflow|gradient|background-clip|text-fill/i.test(stAttr) ||
+                  /paywall|snippet|article|crawler|body|fade/i.test(cls)) {
                 clearFade(child);
               }
               if (looksLikeFadeOverlay(child)) hideGate(child);
-            });
+            }
           } catch (e) {}
         });
 
-        // Also strip inline mask styles anywhere under main
+        // Sweep absolute gradient overlays anywhere
         try {
-          document.querySelectorAll('main [style*="mask"], article [style*="mask"], main [style*="Mask"], article [style*="gradient"]').forEach(clearFade);
+          document.querySelectorAll('div,span,section,aside').forEach(function(el) {
+            if (looksLikeFadeOverlay(el)) hideGate(el);
+          });
         } catch (e) {}
+
+        buildReader();
 
         if (document.documentElement) {
           document.documentElement.style.setProperty('overflow', 'auto', 'important');
         }
         if (document.body) {
           document.body.style.setProperty('overflow', 'auto', 'important');
-          document.body.style.removeProperty('position');
           document.body.classList.remove('overflow-hidden', 'no-scroll', 'modal-open');
         }
       } catch (e) {}
     };
+
     run();
-    setInterval(run, 800);
+    setInterval(run, 700);
     try {
-      new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+      new MutationObserver(function() { run(); }).observe(document.documentElement, {
+        childList: true,
+        subtree: true
+      });
     } catch (e) {}
   } catch (e) {}
 })();
 `
+
 
 
 /**
