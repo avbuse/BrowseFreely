@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { isValidUrl, isPrivateIP, ensureUrl, safeFetch, tlsOptions } from '../utils/url'
 import { mergeBrowseQueryIntoTarget, rewriteHtml } from '../utils/rewriter'
-import { isDataDomeResponse } from '../utils/botChallenge'
+import { isDataDomeChallengePage } from '../utils/botChallenge'
 import { ensureAdblockerReady, matchAdRequest } from '../utils/adblocker'
 import { getSettings } from '../utils/settings'
 import { getCookiesForRequest, saveCookiesFromResponse } from '../utils/session'
@@ -127,7 +127,7 @@ async function handleBrowse(c: Context, method: 'GET' | 'POST') {
     }
 
     const htmlText = new TextDecoder().decode(buffer)
-    const botChallenge = isDataDomeResponse(response, htmlText)
+    const botChallenge = isDataDomeChallengePage(response, htmlText)
 
     cleanHeaders.set('content-type', 'text/html; charset=utf-8')
 
