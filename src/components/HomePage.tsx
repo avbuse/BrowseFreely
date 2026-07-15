@@ -219,7 +219,7 @@ export const HomePage = ({ settings }: { settings: UserSettings }) => {
                 userSelect: 'none' 
               }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginTop: '2px' }}>
-                  <input type="checkbox" name="disableJs" value="true" defaultChecked={settings.disableJs} style={{
+                  <input type="checkbox" name="disableJs" value="true" checked={settings.disableJs} style={{
                     appearance: 'none',
                     width: '20px', 
                     height: '20px', 
@@ -249,6 +249,9 @@ export const HomePage = ({ settings }: { settings: UserSettings }) => {
                     .custom-checkbox:checked + .check-icon {
                       opacity: 1 !important;
                     }
+                    .custom-checkbox:not(:checked) + .check-icon {
+                      opacity: 0 !important;
+                    }
                   ` }} />
                 </div>
                 <div>
@@ -276,7 +279,7 @@ export const HomePage = ({ settings }: { settings: UserSettings }) => {
                 userSelect: 'none' 
               }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginTop: '2px' }}>
-                  <input type="checkbox" name="bypassAdblockDetection" value="true" defaultChecked={settings.bypassAdblockDetection} style={{
+                  <input type="checkbox" name="bypassAdblockDetection" value="true" checked={settings.bypassAdblockDetection} style={{
                     appearance: 'none',
                     width: '20px', 
                     height: '20px', 

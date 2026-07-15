@@ -212,27 +212,28 @@ export const FUTURE_ADSHIELD_PREP_SCRIPT = `
       try { return origPush.apply(this, arguments); } catch (e) { return this.length; }
     };
 
-    // Hide Future / Ad-Shield "please allow ads" chrome as it appears
+    // Hide Future / Ad-Shield "please allow ads" chrome as it appears.
+    // Do NOT hide Sourcepoint/OneTrust consent UI — users need it to save prefs.
     var css = document.createElement('style');
     css.setAttribute('data-bf-adshield', '1');
     css.textContent = [
       '.swal-modal,.swal-overlay,.swal2-container,.swal2-backdrop-show,',
-      '[class*="adblock" i],[id*="adblock" i],',
+      '[class*="adblock-wall" i],[class*="adblock_wall" i],[class*="adblock-modal" i],',
+      '[id*="adblock-detected" i],[id*="adblock-notification" i],',
       '[class*="allow-ads" i],[class*="allowAds" i],',
       '[class*="disable-adblock" i],[class*="adb-enabled" i],',
       '[data-testid*="adblock" i],.van-ads,.van_ads,',
       '#ad-blocker-notice,.ad-blocker-notice,.adblocker-message,',
-      '.fc-ab-root,.fc-dialog-container,[class*="sp_message" i]',
+      '.fc-ab-root',
       '{display:none!important;visibility:hidden!important;pointer-events:none!important;',
-      'height:0!important;max-height:0!important;opacity:0!important;}',
-      'html,body{overflow:auto!important;}'
+      'height:0!important;max-height:0!important;opacity:0!important;}'
     ].join('');
     (document.documentElement || document.head).appendChild(css);
 
     var kill = function() {
       try {
         document.querySelectorAll(
-          '.swal-modal,.swal-overlay,.swal2-container,[class*="adblock" i],[id*="adblock" i],#ad-blocker-notice,.ad-blocker-notice'
+          '.swal-modal,.swal-overlay,.swal2-container,[class*="adblock-wall" i],[class*="adblock_wall" i],[class*="adblock-modal" i],[id*="adblock-detected" i],#ad-blocker-notice,.ad-blocker-notice,.fc-ab-root'
         ).forEach(function(n){ n.remove(); });
         if (document.body) {
           document.body.style.removeProperty('overflow');
