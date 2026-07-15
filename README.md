@@ -14,9 +14,8 @@ A fast, modern, and lightweight web proxy/browser built with **Bun**, **Hono**, 
 - 📖 **Reader Mode (NoScript)**: Instantly strip all JavaScript from a proxied page for maximum speed, security, and easy reading.
 - ⚡ **Asset Caching**: Includes a built-in LRU cache (partitioned per session) to serve repeated static assets directly from memory.
 - 🧩 **SPA Compatibility**: Includes custom fetch interceptors and catch-all routing to support React, Next.js, and other modern Single Page Applications that typically break inside standard proxies.
-- 🚫 **Anti-adblock bypass**: Cosmetic filters + detection stubs help pages render even when sites try to block adblock users.
+- 🚫 **Anti-adblock bypass**: Extra Fanboy/uBO annoyance lists, cosmetic + HTML filters, silent 200 stubs (instead of 403), detection stubs, and **tinyShield** for Future plc / Ad-Shield sites (Windows Central, Tom's Guide, TechRadar, …).
 - 📝 **Broken-site reports**: Hit **Site broken?** in the proxy bar to log a URL locally and (when `GITHUB_TOKEN` is set) open a GitHub issue so Cursor can investigate from the repo.
-- 🚫 **Anti-adblock bypass**: Extra Fanboy/uBO annoyance lists, cosmetic + HTML filters, silent 200 stubs (instead of 403), and detection stubs so pages keep rendering without ads.
 - 🔒 **Security First**: SSRF protection with redirect re-checks, optional LAN targeting, TLS verification on by default, plus rate limiting.
 - 💅 **Modern UI**: Clean, minimalistic, dark-mode native interface using server-rendered JSX.
 
@@ -118,6 +117,8 @@ You can configure BrowseFreely by creating a `.env` file or passing environment 
 * `GITHUB_REPO` - `owner/name` for issues (Default: `avbuse/BrowseFreely`)
 * `GITHUB_ISSUE_LABELS` - Comma-separated labels (Default: `broken-site,anti-adblock`)
 * `INSECURE_TLS` - `true` to skip upstream TLS verification (default: `false`)
+* `DISABLE_TINYSHIELD` - `true` to skip downloading/injecting tinyShield for Ad-Shield hosts (default: enabled)
+* `TINYSHIELD_URL` - Override the tinyShield userscript URL (default: jsDelivr `@filteringdev/tinyshield`)
 
 ## 🚀 Production Native Deployment
 

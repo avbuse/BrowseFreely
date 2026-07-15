@@ -9,6 +9,10 @@ import {
   getCosmeticsForUrl,
 } from './adblocker'
 import { buildNavigationGuardScript } from './navigationGuard'
+import {
+  FUTURE_ADSHIELD_PREP_SCRIPT,
+  shouldInjectTinyShield,
+} from './tinyshield'
 
 function escapeForJsString(value: string): string {
   return value
@@ -76,6 +80,9 @@ export async function rewriteHtml(
     },
   })
 
+  const injectTinyShield =
+    !disableJs && bypassAdblockDetection && shouldInjectTinyShield(baseUrl, html)
+
   rewriter.on('head', {
     element(el) {
       el.append(
@@ -99,6 +106,10 @@ export async function rewriteHtml(
         ]
 
         if (bypassAdblockDetection) {
+          if (injectTinyShield) {
+            // Must run before page Ad-Shield scripts; tinyShield follows as external src.
+            scriptParts.push(FUTURE_ADSHIELD_PREP_SCRIPT)
+          }
           scriptParts.push(ANTI_ADBLOCK_STUB_SCRIPT)
           for (const s of cosmetics.scripts) {
             scriptParts.push(s)
@@ -117,12 +128,13 @@ export async function rewriteHtml(
               var input = arguments[0];
               if (typeof input === 'string' && input.startsWith('/') &&
                   input.indexOf('/browse') !== 0 && input.indexOf('/asset') !== 0 &&
-                  input.indexOf('/api/') !== 0) {
+                  input.indexOf('/api/') !== 0 && input.indexOf('/bf/') !== 0) {
                 arguments[0] = '/asset?url=' + encodeURIComponent(new URL(input, base).href);
               } else if (input && typeof input === 'object' && typeof input.url === 'string') {
                 try {
                   var u = input.url;
-                  if (u.startsWith('/') && u.indexOf('/browse') !== 0 && u.indexOf('/asset') !== 0) {
+                  if (u.startsWith('/') && u.indexOf('/browse') !== 0 && u.indexOf('/asset') !== 0 &&
+                      u.indexOf('/bf/') !== 0) {
                     arguments[0] = new Request('/asset?url=' + encodeURIComponent(new URL(u, base).href), input);
                   }
                 } catch (e) {}
@@ -132,6 +144,13 @@ export async function rewriteHtml(
           })();
         `)
 
+        // Prepend so BF + tinyShield run before site scripts in <head>
+        if (injectTinyShield) {
+          el.prepend(
+            '<script data-bf-tinyshield src="/bf/tinyshield.js"></script>',
+            { html: true }
+          )
+        }
         el.prepend(`<script data-bf-inject>${scriptParts.join('\n')}</script>`, { html: true })
       }
     },
@@ -141,7 +160,11 @@ export async function rewriteHtml(
     rewriter.on('script', {
       element(el) {
         // Keep our chrome scripts if any slipped in; remove page scripts
-        if (el.getAttribute('data-bf-inject') || el.getAttribute('data-bf-topbar-fallback')) {
+        if (
+          el.getAttribute('data-bf-inject') ||
+          el.getAttribute('data-bf-topbar-fallback') ||
+          el.getAttribute('data-bf-tinyshield')
+        ) {
           return
         }
         el.remove()
@@ -215,11 +238,17 @@ export async function rewriteHtml(
   if (!disableJs) {
     rewriter.on('script', {
       element(el) {
-        if (el.getAttribute('data-bf-inject') || el.getAttribute('data-bf-topbar-fallback')) {
+        if (
+          el.getAttribute('data-bf-inject') ||
+          el.getAttribute('data-bf-topbar-fallback') ||
+          el.getAttribute('data-bf-tinyshield')
+        ) {
           return
         }
         const src = el.getAttribute('src')
         if (src) {
+          // Never proxy our first-party /bf/* helpers through /asset
+          if (src.startsWith('/bf/')) return
           const absolute = resolveUrl(baseUrl, src)
           if (absolute.startsWith('http') && !absolute.includes('/asset?url=')) {
             el.setAttribute('src', `/asset?url=${encodeURIComponent(absolute)}`)
